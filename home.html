@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatalog - Library Catalog Assistant</title>
+    <link rel="stylesheet" href="home.css">
+   <body>
+    <!-- Header Navigation -->
+    <header class="header">
+        <div class="header__logo">
+            <img class="header__logo-placeholder"src="chataloglogo.png" alt="Chatalog logo">
+        </div>
+        
+        <nav class="header__nav">
+            <a href="AboutUs.html" class="header__nav-link">About Us</a>
+            <a href="#knowledge-graph" class="header__nav-link">Explore Knowledge Graph</a>
+            <a href="https://www.spl.org" class="header__nav-link" target="_blank">Seattle Public Library</a>
+        </nav>
+        
+        <div class="header__actions">
+            <a href="#account" class="header__account-link">My Account</a>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar with Chat History -->
+        <aside class="sidebar">
+            <div class="sidebar__header">
+                <button class="sidebar__new-chat-btn" id="newChatBtn">
+                    <span class="sidebar__new-chat-icon">+</span>
+                    New Chat
+                </button>
+            </div>
+            
+            <div class="sidebar__history">
+                <h2 class="sidebar__history-title">History</h2>
+                <ul class="sidebar__chat-list" id="chatHistory">
+                    <!-- Chat history items will be dynamically populated here -->
+                    <li class="sidebar__chat-item sidebar__chat-item--active" data-chat-id="1">
+                        A book with the main character named Harry Potter
+                    </li>
+                 <!--   <li class="sidebar__chat-item" data-chat-id="2">
+                        Fantacy books written by women
+                    </li>
+                    <li class="sidebar__chat-item" data-chat-id="3">
+                        Children's books about science
+                    </li>
+                    <li class="sidebar__chat-item" data-chat-id="4">
+                        Authors that were born in Toronto, Canada
+                    </li>
+                    <li class="sidebar__chat-item" data-chat-id="5">
+                        Childerns books written by Canadians
+                    </li>
+                    <li class="sidebar__chat-item" data-chat-id="6">
+                        Graphic novels for teens
+                    </li>
+                    <li class="sidebar__chat-item" data-chat-id="7">
+                        Poetry collections
+                    </li>-->
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="main-content">
+            <div class="main-content__header">
+                <h1 class="main-content__title">Welcome to Chatalog</h1>
+            </div>
+            
+            <div class="main-content__chat-area" id="chatArea">
+                <!-- Chat messages will be dynamically populated here -->
+                <!-- Example message structure:
+                <div class="message message--user">
+                    <div class="message__content">User message text</div>
+                </div>
+                <div class="message message--assistant">
+                    <div class="message__content">Assistant response text</div>
+                </div>
+                -->
+            </div>
+            
+            <div class="main-content__input-area">
+                <input 
+                    type="text" 
+                    class="main-content__input" 
+                    id="messageInput"
+                    placeholder="Ask about books, authors, or library resources..."
+                    autocomplete="off"
+                />
+            
+                
+                <button class="main-content__send-btn" id="sendBtn">↑</button>
+            </div>
+        </main>
+    </div>
+
+    <script src="../static/js/app.js"></script>
+</body>
+</html>
