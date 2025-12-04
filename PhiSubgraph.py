@@ -1,12 +1,9 @@
 import re
-import numpy as np
 from typing import List, Dict, Any, Set, Tuple
 from neo4j import GraphDatabase
 import ollama
-from sentence_transformers import SentenceTransformer
 
-
-class HydeRAGPhi3:
+class SubGraphRAGPhi3:
     
     STOP_WORDS: Set[str] = {
         # Common words
@@ -29,12 +26,7 @@ class HydeRAGPhi3:
     def __init__(self, neo4j_uri: str, neo4j_user: str, neo4j_password: str, database: str = "neo4j"):
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
         self.database = database
-        self.model_name = "phi3:mini"  
-        
-        print("Loading embedding model...")
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        print("Embedding model loaded")
-        
+        self.model_name = "phi3:mini"
         self._verify_connection()
         self._verify_ollama()
     
@@ -65,7 +57,7 @@ class HydeRAGPhi3:
                     model_names.append(m.name)
             
             if not any('phi3:mini' in name.lower() for name in model_names):
-                raise RuntimeError("Phi-3 not found. Run: ollama pull phi3")
+                raise RuntimeError("Phi 3 not found. Run: ollama pull phi3:mini")
         except Exception as e:
             raise Exception(f"Ollama check failed: {e}")
     
@@ -73,33 +65,20 @@ class HydeRAGPhi3:
         self.driver.close()
     
     def _parse_query_logic(self, query: str) -> tuple:
-        """Parse AND/OR logic from query with plural expansion."""
+        """Parse AND/OR logic from query."""
         query_upper = query.upper()
         
         if " AND " in query_upper:
             parts = re.split(r'\s+AND\s+', query, flags=re.IGNORECASE)
             keywords = [p.strip().lower() for p in parts if p.strip()]
-            logic = "AND"
+            return keywords, "AND"
         elif " OR " in query_upper:
             parts = re.split(r'\s+OR\s+', query, flags=re.IGNORECASE)
             keywords = [p.strip().lower() for p in parts if p.strip()]
-            logic = "OR"
+            return keywords, "OR"
         else:
-            words = query.lower().split()
-            keywords = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
-            keywords = keywords if keywords else words[:3]
-            logic = "OR"
-        
-        # Expand with singular/plural variants
-        expanded = []
-        for kw in keywords:
-            expanded.append(kw)
-            if kw.endswith('s') and len(kw) > 3:
-                expanded.append(kw[:-1])
-            elif not kw.endswith('s'):
-                expanded.append(kw + 's')
-        
-        return list(dict.fromkeys(expanded)), logic
+            keywords = self._filter_keywords(query)
+            return keywords, "OR"
     
     def _parse_query_intent(self, query: str) -> Tuple[str, str]:
         query_lower = query.lower().strip()
@@ -127,41 +106,33 @@ class HydeRAGPhi3:
         
         return ("keyword", query)
     
-    def generate_hypothetical_document(self, query: str) -> str:
-        """Generate a hypothetical answer to improve semantic search."""
-        prompt = f"""<|system|>
-You are a helpful library assistant that describes books based on user queries.<|end|>
-<|user|>
-Describe in 2-3 sentences what kind of books would match this request: "{query}"
-Include themes, genres, and typical characteristics.<|end|>
-<|assistant|>"""
-
-        try:
-            response = ollama.generate(
-                model=self.model_name, 
-                prompt=prompt, 
-                options={
-                    "temperature": 0.3,
-                    "num_predict": 150  # Limit token generation
-                }
-            )
-            return response['response']
-        except Exception as e:
-            print(f"Error generating hypothetical document: {e}")
-            return query
+    def _filter_keywords(self, query: str) -> List[str]:
+        words = query.lower().split()
+        keywords = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
+        if not keywords:
+            keywords = [w for w in words if len(w) > 2][:3]
+        keywords = keywords if keywords else words[:3]
+        
+        # Expand with singular/plural variants
+        expanded = []
+        for kw in keywords:
+            expanded.append(kw)
+            if kw.endswith('s') and len(kw) > 3:
+                expanded.append(kw[:-1])
+            elif not kw.endswith('s'):
+                expanded.append(kw + 's')
+        
+        return list(dict.fromkeys(expanded))
     
-    def _cosine_similarity(self, vec1, vec2) -> float:
-        return float(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
-    
-    def retrieve_books_by_hyde(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Core method: HyDE retrieval with hypothetical document."""
+    def find_seed_books(self, query: str, max_seeds: int = 3) -> List[Dict[str, Any]]:
+        """Find seed books matching the query with AND/OR logic."""
         keywords, logic = self._parse_query_logic(query)
         
-        hypothetical_doc = self.generate_hypothetical_document(query)
-        query_embedding = self.embedding_model.encode(hypothetical_doc)
+        if not keywords:
+            return []
         
         with self.driver.session(database=self.database) as session:
-            # Stage 1: Cypher CONTAINS to narrow down candidates
+            # Stage 1: Cypher CONTAINS to narrow down
             result = session.run("""
                 MATCH (b:Book)
                 OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
@@ -179,37 +150,131 @@ Include themes, genres, and typical characteristics.<|end|>
                     b.title AS title,
                     authors,
                     genres
-                LIMIT 500
+                LIMIT 200
             """, keywords=keywords).data()
-        
-        books_with_scores = []
-        for record in result:
-            book_text = f"{record['title']} "
-            authors = [a for a in record.get('authors', []) if a]
-            genres = [g for g in record.get('genres', []) if g]
-            if authors:
-                book_text += f"by {', '.join(authors)} "
-            if genres:
-                book_text += f"genres: {', '.join(genres[:3])}"
             
-            # Stage 2: Python word boundary filter for AND logic
-            text_lower = book_text.lower()
-            if logic == "AND":
-                if not all(re.search(r'\b' + re.escape(kw) + r'\b', text_lower) for kw in keywords):
+            # Stage 2: Python word boundary filtering
+            seeds = []
+            for record in result:
+                title = record['title'] or ''
+                authors = [a for a in record['authors'] if a]
+                genres = [g for g in record['genres'] if g]
+                
+                search_text = title.lower()
+                for g in genres:
+                    search_text += ' ' + g.lower()
+                
+                matches = 0
+                for kw in keywords:
+                    pattern = r'\b' + re.escape(kw) + r'\b'
+                    if re.search(pattern, search_text):
+                        matches += 1
+                
+                if logic == "AND" and matches < len(keywords):
                     continue
+                if logic == "OR" and matches == 0:
+                    continue
+                
+                seeds.append({
+                    'title': title,
+                    'author': authors[0] if authors else '',
+                    'genres': genres,
+                    'score': matches
+                })
             
-            book_embedding = self.embedding_model.encode(book_text)
-            similarity = self._cosine_similarity(query_embedding, book_embedding)
+            seeds.sort(key=lambda x: x['score'], reverse=True)
+            return seeds[:max_seeds]
+    
+    def extract_subgraph(self, seed_titles: List[str], max_nodes: int = 20) -> List[Dict[str, Any]]:
+        """Extract books connected to seeds via graph relationships."""
+        with self.driver.session(database=self.database) as session:
+            result = session.run("""
+                MATCH (seed:Book)
+                WHERE seed.title IN $seed_titles
+                
+                MATCH (seed)-[*1..2]-(related:Book)
+                WHERE seed <> related
+                
+                WITH DISTINCT related
+                
+                OPTIONAL MATCH (related)-[:WRITTEN_BY]->(a:Author)
+                OPTIONAL MATCH (related)-[:HAS_SUBJECT]->(g:Genre)
+                
+                OPTIONAL MATCH (seed:Book)-[:WRITTEN_BY]->(shared_a:Author)<-[:WRITTEN_BY]-(related)
+                WHERE seed.title IN $seed_titles
+                OPTIONAL MATCH (seed:Book)-[:HAS_SUBJECT]->(shared_g:Genre)<-[:HAS_SUBJECT]-(related)
+                WHERE seed.title IN $seed_titles
+                
+                WITH related,
+                     collect(DISTINCT a.author) AS authors,
+                     collect(DISTINCT g.subject_1) AS genres,
+                     count(DISTINCT shared_a) + count(DISTINCT shared_g) AS connections
+                
+                ORDER BY connections DESC
+                LIMIT $max_nodes
+                
+                RETURN 
+                    related.title AS title,
+                    authors,
+                    genres,
+                    connections
+            """, seed_titles=seed_titles, max_nodes=max_nodes).data()
             
-            books_with_scores.append({
-                'title': record['title'],
-                'authors': authors,
-                'genres': genres,
-                'similarity_score': similarity
-            })
+            return [{
+                'title': r['title'],
+                'authors': [a for a in r['authors'] if a],
+                'genres': [g for g in r['genres'] if g],
+                'connection_strength': r['connections']
+            } for r in result]
+    
+    def retrieve_books_by_subgraph(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Core method: Subgraph extraction from seed books."""
+        seeds = self.find_seed_books(query, max_seeds=3)
         
-        books_with_scores.sort(key=lambda x: x['similarity_score'], reverse=True)
-        return books_with_scores[:limit]
+        if not seeds:
+            return self._keyword_search(query, limit)
+        
+        seed_titles = [s['title'] for s in seeds]
+        subgraph = self.extract_subgraph(seed_titles, max_nodes=20)
+        
+        if not subgraph:
+            return [{
+                'title': s['title'],
+                'authors': [s['author']] if s.get('author') else [],
+                'genres': s.get('genres', []),
+                'connection_strength': s.get('score', 0)
+            } for s in seeds[:limit]]
+        
+        return subgraph[:limit]
+    
+    def _keyword_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        keywords = self._filter_keywords(query)
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run("""
+                MATCH (b:Book)
+                OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
+                OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
+                WHERE ANY(keyword IN $keywords WHERE 
+                    toLower(b.title) CONTAINS keyword OR
+                    toLower(coalesce(g.subject_1, '')) CONTAINS keyword
+                )
+                WITH b, 
+                     collect(DISTINCT a.author) AS authors,
+                     collect(DISTINCT g.subject_1) AS genres
+                LIMIT $limit
+                RETURN 
+                    b.title AS title,
+                    authors,
+                    genres
+            """, keywords=keywords, limit=limit).data()
+            
+            return [{
+                'title': r['title'],
+                'authors': [a for a in r['authors'] if a],
+                'genres': [g for g in r['genres'] if g],
+                'connection_strength': 0
+            } for r in result]
     
     def retrieve_books_by_author(self, author_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         cleaned = author_name.lower().replace('.', ' ').replace(',', ' ')
@@ -260,7 +325,8 @@ Include themes, genres, and typical characteristics.<|end|>
                     books.append({
                         'title': record['title'],
                         'authors': [author_full] if author_full else [],
-                        'genres': [g for g in record['genres'] if g]
+                        'genres': [g for g in record['genres'] if g],
+                        'connection_strength': 0
                     })
                     if len(books) >= limit:
                         break
@@ -274,8 +340,8 @@ Include themes, genres, and typical characteristics.<|end|>
             books = self.retrieve_books_by_author(term, limit)
             return books, "author"
         else:
-            books = self.retrieve_books_by_hyde(query, limit)
-            return books, "hyde"
+            books = self.retrieve_books_by_subgraph(query, limit)
+            return books, "subgraph"
     
     def format_context(self, books: List[Dict[str, Any]]) -> str:
         if not books:
@@ -311,9 +377,8 @@ Or try a different search - maybe with different keywords?"""
             if book.get('genres'):
                 book_list += f" (Genres: {', '.join(book['genres'][:2])})"
         
-        prompt = f"""<|system|>
-You are Chatalog, a friendly and knowledgeable chatbot for the Seattle Public Library. You help patrons find books they'll love.<|end|>
-<|user|>
+        prompt = f"""You are Chatalog, a friendly chatbot for the Seattle Public Library.
+
 A patron asked: "{query}"
 
 I found {num_catalog_books} books in our catalog:
@@ -327,48 +392,32 @@ Write a response that:
 5. Suggests 3-5 additional books NOT listed above that fit the patron's interest
 6. Ends with: "Want any of these titles added to our collection? Request them here: https://www.spl.org/books-and-media/suggest-a-title"
 
-Keep it friendly and helpful. Do not make up information about the catalog books.<|end|>
-<|assistant|>"""
+Keep it friendly and helpful. Do not make up information about the catalog books."""
 
         try:
             if stream:
                 response_parts = []
-                for chunk in ollama.generate(
-                    model=self.model_name, 
-                    prompt=prompt, 
-                    stream=True, 
-                    options={
-                        "temperature": 0.7,
-                        "num_predict": 500  # Limit response length
-                    }
-                ):
+                for chunk in ollama.generate(model=self.model_name, prompt=prompt, stream=True, options={"temperature": 0.7}):
                     text = chunk.get('response', '')
                     print(text, end='', flush=True)
                     response_parts.append(text)
                 print()
                 return ''.join(response_parts)
             else:
-                response = ollama.generate(
-                    model=self.model_name, 
-                    prompt=prompt, 
-                    options={
-                        "temperature": 0.7,
-                        "num_predict": 500
-                    }
-                )
+                response = ollama.generate(model=self.model_name, prompt=prompt, options={"temperature": 0.7})
                 return response['response']
         except Exception as e:
             return f"Error generating response: {e}"
     
     def recommend(self, query: str, retrieval_method: str = "smart", limit: int = 5, stream: bool = False) -> Dict[str, Any]:
         print(f"\nQuery: {query}")
-        print(f"Method: HyDE RAG with Phi-3 Mini ({retrieval_method})\n")
+        print(f"Method: SubGraph RAG ({retrieval_method})\n")
         
         if retrieval_method == "smart":
             books, method_used = self.smart_retrieve(query, limit)
         else:
-            books = self.retrieve_books_by_hyde(query, limit)
-            method_used = "hyde"
+            books = self.retrieve_books_by_subgraph(query, limit)
+            method_used = "subgraph"
         
         print(f"Found {len(books)} books (method: {method_used})\n")
         
@@ -387,11 +436,11 @@ Keep it friendly and helpful. Do not make up information about the catalog books
 def main():
     from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE
     
-    system = HydeRAGPhi3(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE)
+    system = SubGraphRAGPhi3(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE)
     
     try:
         print("\nChatalog - Seattle Public Library Assistant")
-        print("Powered by HyDE RAG with Phi-3 Mini\n")
+        print("Powered by SubGraph RAG\n")
         print("Type 'quit' to exit\n")
         
         while True:
