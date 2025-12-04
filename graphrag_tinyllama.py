@@ -100,7 +100,7 @@ class GraphRAGTinyLlama:
         
         "magic AND dragons" -> (["magic", "dragons"], "AND")
         "witches OR wizards" -> (["witches", "wizards"], "OR")
-        "fantasy adventure" -> (["fantasy", "adventure"], "OR")
+        "fantasy adventure" -> (["fantasy", "adventure"], "AND")
         """
         query_upper = query.upper()
         
@@ -361,13 +361,12 @@ class GraphRAGTinyLlama:
     
     def generate_response(self, query: str, context: str, books: List[Dict[str, Any]] = None, stream: bool = False) -> str:
         """Generate response using TinyLlama with Chatalog persona."""
+        """You can suggest a title for the library to add here:
+        https://www.spl.org/books-and-media/suggest-a-title"""
         if not books:
             return """Hi! I'm Chatalog, a chatbot for the Seattle Public Library.
 
 I couldn't find any books matching your request in our catalog.
-
-You can suggest a title for the library to add here:
-https://www.spl.org/books-and-media/suggest-a-title
 
 Or try a different search - maybe with different keywords?"""
         
@@ -437,7 +436,7 @@ Keep it friendly and helpful. Do not make up information about the catalog books
 
 
 def main():
-    from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE
+    from Chatalog.config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE
     
     system = GraphRAGTinyLlama(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE)
     

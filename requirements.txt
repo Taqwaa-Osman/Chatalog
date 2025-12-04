@@ -1,0 +1,16 @@
+# Chatalog Dependencies
+# Install with: pip install -r requirements.txt
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Database
+neo4j>=5.14.0
+
+# LLM
+ollama>=0.1.0
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.0.0
