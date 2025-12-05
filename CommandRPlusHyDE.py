@@ -71,7 +71,7 @@ class CommandRPlusHyDE:
         bl = "\n".join([f"{i+1}. {b['title']} by {', '.join(b.get('authors',[]))}" for i,b in enumerate(books)])
         prompt = f"You are Chatalog. A patron asked: \"{query}\" I found these books:\n{bl}\nReply concisely."
         try:
-            resp = co.generate(model=COHERE_MODEL, prompt=prompt, max_tokens=200, temperature=0.5)
-            return resp.generations[0].text.strip()
+            resp = resp = co.chat(model=COHERE_MODEL, message=prompt)
+            return resp.text.strip()
         except Exception as e:
             return f"[LLM ERROR] {e}"
