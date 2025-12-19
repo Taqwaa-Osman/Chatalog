@@ -41,7 +41,7 @@ recommender = None
 def get_recommender():
     global recommender
     if recommender is None:
-        from QwenGraph import GraphRAGQwen
+        from phi_and_qwen_angela.QwenGraph import GraphRAGQwen
         recommender = GraphRAGQwen(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE)
     return recommender
 
@@ -73,24 +73,24 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Serve static files
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
+app.mount("/static", StaticFiles(directory="frontend_taqwaa"), name="static")
 
 @app.get("/")
 async def home():
-    return FileResponse("frontend/home.html")
+    return FileResponse("frontend_taqwaa/home.html")
 
 @app.get("/{filename}.html")
 async def pages(filename: str):
-    return FileResponse(f"frontend/{filename}.html")
+    return FileResponse(f"frontend_taqwaa/{filename}.html")
 
 @app.get("/{filename}.css")
 async def css(filename: str):
-    return FileResponse(f"frontend/{filename}.css")
+    return FileResponse(f"frontend_taqwaa/{filename}.css")
 
 @app.get("/{filename}.png")
 async def images(filename: str):
-    return FileResponse(f"frontend/{filename}.png")
+    return FileResponse(f"frontend_taqwaa/{filename}.png")
 
 @app.get("/{filename}.js")
 async def js(filename: str):
-    return FileResponse(f"frontend/{filename}.js")
+    return FileResponse(f"frontend_taqwaa/{filename}.js")
