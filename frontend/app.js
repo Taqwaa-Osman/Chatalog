@@ -31,9 +31,15 @@ async function handleSend() {
     addMessage(message, 'user');
     messageInput.value = '';
     
-    // Show loading
+    // Show loading with rotating messages
     sendBtn.disabled = true;
+    const loadingWords = ['Thinking', 'Pondering', 'Caramelizing', 'Reflecting', 'Envisioning', 'Ruminating', 'Meditating', 'Picturing', 'Visualizing'];
+    let wordIndex = 0;
     const loading = addMessage('Thinking...', 'assistant');
+    const loadingInterval = setInterval(() => {
+        wordIndex = (wordIndex + 1) % loadingWords.length;
+        loading.querySelector('.message__content').textContent = loadingWords[wordIndex] + '...';
+    }, 2000);
     
     try {
         const response = await fetch('/api/chat', {
@@ -43,6 +49,7 @@ async function handleSend() {
         });
         
         const data = await response.json();
+        clearInterval(loadingInterval);
         loading.remove();
         
         if (data.success) {
@@ -51,6 +58,7 @@ async function handleSend() {
             addMessage('Sorry, something went wrong.', 'assistant');
         }
     } catch (error) {
+        clearInterval(loadingInterval);
         loading.remove();
         addMessage('Could not connect to server.', 'assistant');
     }

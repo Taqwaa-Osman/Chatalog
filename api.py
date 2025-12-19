@@ -41,8 +41,8 @@ recommender = None
 def get_recommender():
     global recommender
     if recommender is None:
-        from graphrag_tinyllama import GraphRAGTinyLlama
-        recommender = GraphRAGTinyLlama(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE)
+        from QwenGraph import GraphRAGQwen
+        recommender = GraphRAGQwen(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, DATABASE)
     return recommender
 
 # API Endpoints
