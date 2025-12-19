@@ -1,37 +1,104 @@
 /*
  * Chatalog Frontend
- * Connects chat UI to FastAPI backend
  */
 
-let chatArea, messageInput, sendBtn, newChatBtn;
+console.log('app.js loaded');
+let chatArea, messageInput, sendBtn, newChatBtn, chatHistoryList;
+let currentSessionId = null;
 
-// Initialize
 document.addEventListener('DOMContentLoaded', () => {
     chatArea = document.getElementById('chatArea');
     messageInput = document.getElementById('messageInput');
     sendBtn = document.getElementById('sendBtn');
     newChatBtn = document.getElementById('newChatBtn');
+    chatHistoryList = document.getElementById('chatHistory');
     
     sendBtn?.addEventListener('click', handleSend);
     messageInput?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleSend();
     });
-    newChatBtn?.addEventListener('click', () => {
-        chatArea.innerHTML = '';
-        messageInput.value = '';
-    });
+    newChatBtn?.addEventListener('click', startNewChat);
+    
+    loadChatHistory();
 });
 
-// Send message to API
+async function loadChatHistory() {
+    try {
+        const response = await fetch('/api/sessions?limit=20');
+        const sessions = await response.json();
+        renderChatHistory(sessions);
+    } catch (error) {
+        console.error('Failed to load history:', error);
+    }
+}
+
+function renderChatHistory(sessions) {
+    if (!chatHistoryList) return;
+    chatHistoryList.innerHTML = '';
+    
+    if (sessions.length === 0) {
+        chatHistoryList.innerHTML = '<li class="sidebar__chat-item text-light">No past chats yet</li>';
+        return;
+    }
+    
+    sessions.forEach(session => {
+        const li = document.createElement('li');
+        li.className = 'sidebar__chat-item';
+        if (session.session_id === currentSessionId) {
+            li.classList.add('sidebar__chat-item--active');
+        }
+        
+        const title = session.title || 'New Chat';
+        const displayTitle = title.length > 35 ? title.substring(0, 35) + '...' : title;
+        
+        const date = new Date(session.updated_at);
+        const timeAgo = getTimeAgo(date);
+        
+        li.innerHTML = `
+            <div style="font-size:14px;">${escapeHtml(displayTitle)}</div>
+            <div style="font-size:11px;color:var(--text-light);margin-top:2px;">${timeAgo}</div>
+        `;
+        
+        li.addEventListener('click', () => loadSession(session.session_id));
+        chatHistoryList.appendChild(li);
+    });
+}
+
+async function loadSession(sessionId) {
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/messages`);
+        const messages = await response.json();
+        
+        chatArea.innerHTML = '';
+        currentSessionId = sessionId;
+        
+        messages.forEach(msg => {
+            const books = msg.books?.map(title => ({ title })) || [];
+            addMessage(msg.content, msg.role, books, false);
+        });
+        
+        loadChatHistory();
+        chatArea.scrollTop = chatArea.scrollHeight;
+    } catch (error) {
+        console.error('Failed to load session:', error);
+    }
+}
+
+function startNewChat() {
+    currentSessionId = null;
+    chatArea.innerHTML = '';
+    messageInput.value = '';
+    messageInput.focus();
+    loadChatHistory();
+}
+
 async function handleSend() {
     const message = messageInput.value.trim();
     if (!message) return;
     
-    // Show user message
     addMessage(message, 'user');
     messageInput.value = '';
     
-    // Show loading with rotating messages
     sendBtn.disabled = true;
     const loadingWords = ['Thinking', 'Pondering', 'Caramelizing', 'Reflecting', 'Envisioning', 'Ruminating', 'Meditating', 'Picturing', 'Visualizing'];
     let wordIndex = 0;
@@ -45,7 +112,7 @@ async function handleSend() {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, limit: 5 })
+            body: JSON.stringify({ message, session_id: currentSessionId, limit: 5 })
         });
         
         const data = await response.json();
@@ -53,7 +120,9 @@ async function handleSend() {
         loading.remove();
         
         if (data.success) {
+            currentSessionId = data.session_id;
             addMessage(data.response, 'assistant', data.books);
+            loadChatHistory();
         } else {
             addMessage('Sorry, something went wrong.', 'assistant');
         }
@@ -64,25 +133,22 @@ async function handleSend() {
     }
     
     sendBtn.disabled = false;
+    messageInput.focus();
 }
 
-// Add message to chat
-function addMessage(text, role, books = null) {
+function addMessage(text, role, books = null, animate = true) {
     const div = document.createElement('div');
     div.className = `message message--${role}`;
+    if (!animate) div.style.animation = 'none';
     
     const content = document.createElement('div');
     content.className = 'message__content';
-    content.innerHTML = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
+    content.innerHTML = escapeHtml(text)
         .replace(/\n/g, '<br>')
         .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
     
     div.appendChild(content);
     
-    // Add book cards if present
     if (books?.length) {
         const grid = document.createElement('div');
         grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-top:15px;padding-top:15px;border-top:1px solid var(--border-light);';
@@ -92,8 +158,8 @@ function addMessage(text, role, books = null) {
             card.className = 'card card--light';
             card.style.cssText = 'flex:1;min-width:180px;max-width:250px;';
             card.innerHTML = `
-                <div class="card__title">${book.title || 'Unknown'}</div>
-                ${book.authors?.length ? `<div class="card__subtitle">by ${book.authors.join(', ')}</div>` : ''}
+                <div class="card__title">${escapeHtml(book.title || 'Unknown')}</div>
+                ${book.authors?.length ? `<div class="card__subtitle">by ${escapeHtml(book.authors.join(', '))}</div>` : ''}
             `;
             grid.appendChild(card);
         });
@@ -104,4 +170,23 @@ function addMessage(text, role, books = null) {
     chatArea.appendChild(div);
     chatArea.scrollTop = chatArea.scrollHeight;
     return div;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function getTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
 }

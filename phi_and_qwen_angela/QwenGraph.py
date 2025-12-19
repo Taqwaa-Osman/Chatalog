@@ -7,13 +7,14 @@ class GraphRAGQwen:
     
     STOP_WORDS: Set[str] = {
         # Common words
-        'the', 'a', 'an', 'of', 'in', 'to', 'for', 'and', 'or', 'by', 
-        'with', 'is', 'it', 'as', 'at', 'on', 'are', 'was', 'were',
+        'the', 'a', 'an', 'of', 'in', 'to', 'for', 'are', 'there', 'by', 
+        'with', 'is', 'it', 'as', 'at', 'on', 'are', 'was', 'were', 'does', 'have',
         # Pronouns
         'i', 'me', 'my', 'we', 'our', 'you', 'your', 'they', 'them',
         # Library-specific phrases
         'books', 'book', 'does', 'library', 'have', 'catalog', 'catalogue',
-        'seattle', 'public', 'spl',
+        'seattle', 'public', 'spl', 'have', 'get', 'find', 'looking',
+        'lookingfor', 'looking for', 'show', 
         # Request words
         'want', 'need', 'find', 'looking', 'search', 'show', 'give', 'get',
         'some', 'about', 'from', 'that', 'this', 'what', 'which', 'who',
@@ -78,8 +79,8 @@ class GraphRAGQwen:
                 return ("similar", match.group(1).strip())
         
         author_patterns = [
-            r'(?:books?\s+)?(?:written\s+by|by)\s+(.+)',
-            r'(.+?)(?:\'s)?\s+books?$',
+            r'(?:books?\s+)?(?:written\s+by|authored\s+by|by)\s+(.+)',
+            r"(.+?)'s\s+books?$",
         ]
         for pattern in author_patterns:
             match = re.search(pattern, query_lower)
@@ -139,11 +140,11 @@ class GraphRAGQwen:
         
         if not keywords:
             if debug:
-                print(f"  No keywords extracted from: {query}")
+                print(f"  No keywords extracted from: {query}", flush=True)
             return []
         
         if debug:
-            print(f"  Keywords: {keywords} (logic: {logic})")
+            print(f"  Keywords: {keywords} (logic: {logic})", flush=True)
         
         with self.driver.session(database=self.database) as session:
             # Stage 1: Use Cypher CONTAINS to narrow down candidates
@@ -168,7 +169,7 @@ class GraphRAGQwen:
             """, keywords=keywords).data()
             
             if debug:
-                print(f"  Stage 1 (CONTAINS): {len(result)} candidates")
+                print(f"  Stage 1 (CONTAINS): {len(result)} candidates", flush=True)
             
             # Stage 2: Python word boundary filtering
             books = []
@@ -204,7 +205,7 @@ class GraphRAGQwen:
             books.sort(key=lambda x: x['relevance'], reverse=True)
             
             if debug:
-                print(f"  Stage 2 (word boundary): {len(books)} matches")
+                print(f"  Stage 2 (word boundary): {len(books)} matches", flush=True)
             
             return books[:limit]
     
@@ -330,7 +331,7 @@ class GraphRAGQwen:
         intent, term = self._parse_query_intent(query)
         
         if debug:
-            print(f"  Intent: {intent}, Term: '{term}'")
+            print(f"  Intent: {intent}, Term: '{term}'", flush=True)
         
         if intent == "author":
             books = self.retrieve_books_by_author(term, limit)
@@ -410,8 +411,8 @@ Keep it friendly and helpful. Do not make up information about the catalog books
             return f"Error generating response: {e}"
     
     def recommend(self, query: str, retrieval_method: str = "smart", limit: int = 5, stream: bool = False) -> Dict[str, Any]:
-        print(f"\nQuery: {query}")
-        print(f"Method: {retrieval_method}\n")
+        print(f"\nQuery: {query}", flush=True)
+        print(f"Method: {retrieval_method}\n", flush=True)
         
         if retrieval_method == "smart":
             books, method_used = self.smart_retrieve(query, limit)
@@ -419,7 +420,7 @@ Keep it friendly and helpful. Do not make up information about the catalog books
             books = self.retrieve_books_by_keyword(query, limit)
             method_used = "keyword"
         
-        print(f"Found {len(books)} books (method: {method_used})\n")
+        print(f"Found {len(books)} books (method: {method_used})\n", flush=True)
         
         context = self.format_context(books)
         response = self.generate_response(query, context, books=books, stream=stream)
