@@ -10,5 +10,5 @@ Setup Instructions
    - ollama pull qwen2.5:3b
    
 4. Start the server:
-   - python api.py
+   - uvicorn api:app --reload
    - Then open http://localhost:8000 in your browser.
