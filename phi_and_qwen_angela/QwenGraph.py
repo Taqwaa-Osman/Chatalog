@@ -8,7 +8,7 @@ class GraphRAGQwen:
     STOP_WORDS: Set[str] = {
         # Common words
         'the', 'a', 'an', 'of', 'in', 'to', 'for', 'are', 'there', 'by', 
-        'with', 'is', 'it', 'as', 'at', 'on', 'are', 'was', 'were', 'does', 'have',
+        'with', 'is', 'it', 'as', 'at', 'on', 'are', 'was', 'were', 'does', 'have', 'any',
         # Pronouns
         'i', 'me', 'my', 'we', 'our', 'you', 'your', 'they', 'them',
         # Library-specific phrases
