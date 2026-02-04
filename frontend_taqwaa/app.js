@@ -23,18 +23,37 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadChatHistory() {
+    // Only show chat history if user is logged in
+    if (!window.Auth?.isLoggedIn()) {
+        renderChatHistory([]);
+        return;
+    }
+    
     try {
-        const response = await fetch('/api/sessions?limit=20');
+        const url = `/api/sessions/user/${Auth.getUserId()}?limit=20`;
+        const response = await fetch(url);
         const sessions = await response.json();
         renderChatHistory(sessions);
     } catch (error) {
         console.error('Failed to load history:', error);
+        renderChatHistory([]);
     }
 }
 
 function renderChatHistory(sessions) {
     if (!chatHistoryList) return;
     chatHistoryList.innerHTML = '';
+    
+    // If not logged in, show sign-in prompt
+    if (!window.Auth?.isLoggedIn()) {
+        chatHistoryList.innerHTML = `
+            <li class="sidebar__chat-item text-light" style="text-align:center;padding:20px 15px;">
+                <div style="margin-bottom:8px;">💬</div>
+                <div style="font-size:13px;">Sign in to save your chat history</div>
+            </li>
+        `;
+        return;
+    }
     
     if (sessions.length === 0) {
         chatHistoryList.innerHTML = '<li class="sidebar__chat-item text-light">No past chats yet</li>';
@@ -89,7 +108,11 @@ function startNewChat() {
     chatArea.innerHTML = '';
     messageInput.value = '';
     messageInput.focus();
-    loadChatHistory();
+    
+    // Only reload history if logged in
+    if (window.Auth?.isLoggedIn()) {
+        loadChatHistory();
+    }
 }
 
 async function handleSend() {
@@ -109,10 +132,21 @@ async function handleSend() {
     }, 2000);
     
     try {
+        const payload = { 
+            message, 
+            session_id: currentSessionId, 
+            limit: 5 
+        };
+        
+        // Include user_id if logged in
+        if (window.Auth?.isLoggedIn()) {
+            payload.user_id = Auth.getUserId();
+        }
+        
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, session_id: currentSessionId, limit: 5 })
+            body: JSON.stringify(payload)
         });
         
         const data = await response.json();
@@ -190,3 +224,6 @@ function getTimeAgo(date) {
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString();
 }
+
+// Export for auth.js to use
+window.loadChatHistory = loadChatHistory;

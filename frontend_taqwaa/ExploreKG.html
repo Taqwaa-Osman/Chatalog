@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About Us - Chatalog</title>
+    <title>Explore Knowledge Graph - Chatalog</title>
     <link rel="stylesheet" href="home.css">
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
-    <!-- Header Navigation -->
     <header class="header">
         <div class="header__logo">
-            <img class="header__logo-placeholder"src="chataloglogo.png" alt="Chatalog logo">
+            <img class="header__logo-placeholder" src="chataloglogo.png" alt="Chatalog logo">
         </div>
         
         <nav class="header__nav">
-            <a href="home.html" class="header__nav-link header__nav-link--active">Chat</a>
-            <a href="about.html" class="header__nav-link header__nav-link--active">About Us</a>
-            <a href="ExploreKG.html" class="header__nav-link">Explore Knowledge Graph</a>
+            <a href="home.html" class="header__nav-link">Chat</a>
+            <a href="about.html" class="header__nav-link">About Us</a>
+            <a href="ExploreKG.html" class="header__nav-link header__nav-link--active">Explore Knowledge Graph</a>
             <a href="https://www.spl.org/" class="header__nav-link" target="_blank" rel="noopener noreferrer">Seattle Public Library</a>
         </nav>
         
@@ -24,6 +24,89 @@
             <a href="#account" class="header__account-link">My Account</a>
         </div>
     </header>
-    <h1>Explore Knowledge Graph</h1>
-    <p>Coming Soon</p>
+
+    <div class="explore-container">
+        <div id="viz"></div>
+        <div class="explore-loading" id="loading">Loading graph...</div>
+        
+        <div class="explore-legend">
+            <div class="explore-legend__title">Node Types</div>
+            <div class="explore-legend__item">
+                <span class="explore-legend__color" style="background: #4CAF50;"></span> Book
+            </div>
+            <div class="explore-legend__item">
+                <span class="explore-legend__color" style="background: #b43444;"></span> Author
+            </div>
+            <div class="explore-legend__item">
+                <span class="explore-legend__color" style="background: #FF9800;"></span> Subject
+            </div>
+            <div class="explore-legend__item">
+                <span class="explore-legend__color" style="background: #5c3854;"></span> Publisher
+            </div>
+        </div>
+
+        <div class="explore-stats" id="stats">Loading...</div>
+    </div>
+
+    <script>
+        const colors = {
+            Book: "#4CAF50",
+            Author: "#b43444",
+            Subject: "#FF9800",
+            Publisher: "#5c3854",
+        };
+
+        fetch('/api/graph?limit=500')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('stats').textContent = 
+                    `${data.nodes.length} nodes • ${data.relationships.length} relationships`;
+
+                // Convert to vis.js format
+                const nodes = data.nodes.map(n => ({
+                    id: n.id,
+                    label: n.name.length > 20 ? n.name.substring(0, 20) + '...' : n.name,
+                    title: n.name,  // tooltip
+                    color: colors[n.label] || "#888888",
+                    font: { color: "#ffffff", size: 10 }
+                }));
+
+                const edges = data.relationships.map(r => ({
+                    from: r.source,
+                    to: r.target,
+                    label: r.type,
+                    font: { size: 8, color: "#888888" },
+                    arrows: "to"
+                }));
+
+                // Create network
+                const container = document.getElementById('viz');
+                const network = new vis.Network(container, 
+                    { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
+                    {
+                        physics: {
+                            stabilization: { iterations: 100 },
+                            barnesHut: { gravitationalConstant: -5000, springLength: 150 }
+                        },
+                        interaction: { hover: true, zoomView: true, dragView: true },
+                        nodes: { shape: "dot", size: 16 },
+                        edges: { smooth: { type: "continuous" } }
+                    }
+                );
+
+                network.on("click", function(params) {
+                    if (params.nodes.length > 0) {
+                        const nodeId = params.nodes[0];
+                        const node = nodes.find(n => n.id === nodeId);
+                        if (node) alert(node.title);
+                    }
+                });
+            })
+            .catch(err => {
+                document.getElementById('loading').textContent = 'Failed to load graph';
+                console.error('Error:', err);
+            });
+    </script>
 </body>
+</html>

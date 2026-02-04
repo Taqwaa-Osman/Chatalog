@@ -20,9 +20,93 @@
         </nav>
         
         <div class="header__actions">
-            <a href="#account" class="header__account-link">My Account</a>
+            <!-- Logged out state -->
+            <a href="#" class="header__account-link" id="loginBtn">My Account</a>
+            
+            <!-- Logged in state (hidden by default) -->
+            <div class="header__user-menu hidden" id="userMenu">
+                <button class="header__user-btn" id="userMenuBtn">
+                    <span class="header__user-avatar" id="userAvatar">U</span>
+                    <span class="header__username" id="usernameDisplay">User</span>
+                </button>
+                <div class="header__dropdown hidden" id="userDropdown">
+                    <a href="#" class="header__dropdown-item" id="myChatsBtn">
+                        <span>💬</span> My Chats
+                    </a>
+                    <hr class="header__dropdown-divider">
+                    <a href="#" class="header__dropdown-item header__dropdown-item--danger" id="logoutBtn">
+                        <span>🚪</span> Sign Out
+                    </a>
+                </div>
+            </div>
         </div>
     </header>
+
+    <!-- Auth Modal -->
+    <div class="modal hidden" id="authModal">
+        <div class="modal__backdrop" id="modalBackdrop"></div>
+        <div class="modal__content">
+            <button class="modal__close" id="modalClose">&times;</button>
+            
+            <!-- Login Form -->
+            <div class="modal__form" id="loginForm">
+                <h2 class="modal__title">Welcome Back</h2>
+                <p class="modal__subtitle">Sign in to access your chat history</p>
+                
+                <div class="form__group">
+                    <label class="form__label" for="loginEmail">Email</label>
+                    <input type="email" class="form__input" id="loginEmail" placeholder="your@email.com" required>
+                </div>
+                
+                <div class="form__group">
+                    <label class="form__label" for="loginPassword">Password</label>
+                    <input type="password" class="form__input" id="loginPassword" placeholder="Enter password" required>
+                </div>
+                
+                <div class="form__error hidden" id="loginError"></div>
+                
+                <button class="form__submit" id="loginSubmit">Sign In</button>
+                
+                <p class="modal__switch">
+                    Don't have an account? <a href="#" id="showRegister">Create one</a>
+                </p>
+            </div>
+            
+            <!-- Register Form -->
+            <div class="modal__form hidden" id="registerForm">
+                <h2 class="modal__title">Create Account</h2>
+                <p class="modal__subtitle">Join Chatalog to save your chat history</p>
+                
+                <div class="form__group">
+                    <label class="form__label" for="registerName">Name</label>
+                    <input type="text" class="form__input" id="registerName" placeholder="Your name" required>
+                </div>
+                
+                <div class="form__group">
+                    <label class="form__label" for="registerEmail">Email</label>
+                    <input type="email" class="form__input" id="registerEmail" placeholder="your@email.com" required>
+                </div>
+                
+                <div class="form__group">
+                    <label class="form__label" for="registerPassword">Password</label>
+                    <input type="password" class="form__input" id="registerPassword" placeholder="Min 6 characters" required>
+                </div>
+                
+                <div class="form__group">
+                    <label class="form__label" for="registerCard">SPL Library Card (Optional)</label>
+                    <input type="text" class="form__input" id="registerCard" placeholder="Your library card number">
+                </div>
+                
+                <div class="form__error hidden" id="registerError"></div>
+                
+                <button class="form__submit" id="registerSubmit">Create Account</button>
+                
+                <p class="modal__switch">
+                    Already have an account? <a href="#" id="showLogin">Sign in</a>
+                </p>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Container -->
     <div class="container">
@@ -39,7 +123,6 @@
                 <h2 class="sidebar__history-title">History</h2>
                 <ul class="sidebar__chat-list" id="chatHistory">
                     <!-- Chat history items will be dynamically populated here -->
-
                 </ul>
             </div>
         </aside>
@@ -52,14 +135,6 @@
             
             <div class="main-content__chat-area" id="chatArea">
                 <!-- Chat messages will be dynamically populated here -->
-                <!-- Example message structure:
-                <div class="message message--user">
-                    <div class="message__content">User message text</div>
-                </div>
-                <div class="message message--assistant">
-                    <div class="message__content">Assistant response text</div>
-                </div>
-                -->
             </div>
             
             <div class="main-content__input-area">
@@ -70,13 +145,12 @@
                     placeholder="Ask about books, authors, or library resources..."
                     autocomplete="off"
                 />
-            
-                
                 <button class="main-content__send-btn" id="sendBtn">→</button>
             </div>
         </main>
     </div>
 
     <script src="app.js"></script>
+    <script src="auth.js"></script>
 </body>
 </html>
