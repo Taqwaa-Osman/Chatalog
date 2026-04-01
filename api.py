@@ -369,48 +369,56 @@ async def get_neo4j_config():
 
 @app.get("/api/graph")
 async def get_graph_data(limit: int = 500):
-    """Fetch graph data for visualization"""
+    """Fetch graph data for visualization.
+
+    Fetches each relationship type with its own sub-limit so no single
+    type (e.g. WRITTEN_BY) can starve Subject / Publisher nodes out of
+    the response.  All relationship endpoints are guaranteed to exist
+    in the returned nodes list.
+    """
+    per_type = max(50, limit // 4)
+
+    # Single UNION ALL query — one round-trip, each rel type gets its own LIMIT
+    # so no type can starve the others out of the result set.
+    cypher = """
+        MATCH (a:Book)-[r:WRITTEN_BY]->(b:Author)
+        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
+               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
+               type(r) AS rel_type
+        LIMIT $lim
+    UNION ALL
+        MATCH (a:Book)-[r:HAS_SUBJECT]->(b:Subject)
+        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
+               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
+               type(r) AS rel_type
+        LIMIT $lim
+    UNION ALL
+        MATCH (a:Book)-[r:PUBLISHED_BY]->(b:Publisher)
+        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
+               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
+               type(r) AS rel_type
+        LIMIT $lim
+    UNION ALL
+        MATCH (a:Book)-[r:HAS_LOCATION]->(b:Location)
+        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
+               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
+               type(r) AS rel_type
+        LIMIT $lim
+    """
+
+    nodes_map: dict = {}
+    relationships: list = []
+
     with get_history_driver().session(database=DATABASE) as session:
-        # Get nodes
-        nodes_result = session.run("""
-            MATCH (n)
-            WHERE n:Book OR n:Author OR n:Subject OR n:Publisher OR n:Location
-            RETURN 
-                elementId(n) AS id,
-                labels(n)[0] AS label,
-                COALESCE(n.title, n.name, 'Unknown') AS name
-            LIMIT $limit
-        """, limit=limit)
-        
-        nodes = []
-        for record in nodes_result:
-            nodes.append({
-                "id": record["id"],
-                "label": record["label"],
-                "name": record["name"]
-            })
-        
-        # Get relationships
-        rels_result = session.run("""
-            MATCH (a)-[r]->(b)
-            WHERE (a:Book OR a:Author OR a:Subject OR a:Publisher OR a:Location)
-              AND (b:Book OR b:Author OR b:Subject OR b:Publisher OR b:Location)
-            RETURN 
-                elementId(a) AS source,
-                elementId(b) AS target,
-                type(r) AS type
-            LIMIT $limit
-        """, limit=limit)
-        
-        relationships = []
-        for record in rels_result:
-            relationships.append({
-                "source": record["source"],
-                "target": record["target"],
-                "type": record["type"]
-            })
-        
-        return {
-            "nodes": nodes,
-            "relationships": relationships
-        }
+        for record in session.run(cypher, lim=per_type):
+            sid, tid = record["source_id"], record["target_id"]
+            if sid not in nodes_map:
+                nodes_map[sid] = {"id": sid, "label": record["source_label"], "name": record["source_name"]}
+            if tid not in nodes_map:
+                nodes_map[tid] = {"id": tid, "label": record["target_label"], "name": record["target_name"]}
+            relationships.append({"source": sid, "target": tid, "type": record["rel_type"]})
+
+    return {
+        "nodes": list(nodes_map.values()),
+        "relationships": relationships
+    }
