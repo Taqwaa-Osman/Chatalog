@@ -4,26 +4,119 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>About Us - Chatalog</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="home.css">
 </head>
 <body>
-    <!-- Header Navigation -->
     <header class="header">
         <div class="header__logo">
-            <img class="header__logo-placeholder"src="chataloglogo.png" alt="Chatalog logo">
+            <img class="header__logo-placeholder" src="chataloglogo.png" alt="Chatalog logo">
         </div>
-        
+
         <nav class="header__nav">
-            <a href="home.html" class="header__nav-link header__nav-link--active">Chat</a>
-            <a href="about.html" class="header__nav-link header__nav-link--active">About Us</a>
+            <a href="home.html" class="header__nav-link">Chat</a>
+            <a href="AboutUs.html" class="header__nav-link header__nav-link--active">About Us</a>
             <a href="ExploreKG.html" class="header__nav-link">Explore Knowledge Graph</a>
             <a href="https://www.spl.org/" class="header__nav-link" target="_blank" rel="noopener noreferrer">Seattle Public Library</a>
         </nav>
-        
+
         <div class="header__actions">
-            <a href="#account" class="header__account-link">My Account</a>
+            <a href="#" class="header__account-link" id="loginBtn">My Account</a>
+
+            <div class="header__user-menu hidden" id="userMenu">
+                <button class="header__user-btn" id="userMenuBtn">
+                    <span class="header__user-avatar" id="userAvatar">U</span>
+                    <span class="header__username" id="usernameDisplay">User</span>
+                </button>
+                <div class="header__dropdown hidden" id="userDropdown">
+                    <a href="home.html" class="header__dropdown-item">
+                        <span>💬</span> My Chats
+                    </a>
+                    <hr class="header__dropdown-divider">
+                    <a href="#" class="header__dropdown-item header__dropdown-item--danger" id="logoutBtn">
+                        <span>🚪</span> Sign Out
+                    </a>
+                </div>
+            </div>
         </div>
     </header>
-    <h1>About Us</h1>
-    <p>Coming Soon</p>
+
+    <div class="modal hidden" id="authModal">
+        <div class="modal__backdrop" id="modalBackdrop"></div>
+        <div class="modal__content">
+            <button class="modal__close" id="modalClose">&times;</button>
+
+            <div class="modal__form" id="loginForm">
+                <h2 class="modal__title">Welcome Back</h2>
+                <p class="modal__subtitle">Sign in to access your chat history</p>
+                <div class="form__group">
+                    <label class="form__label" for="loginEmail">Email</label>
+                    <input type="email" class="form__input" id="loginEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="loginPassword">Password</label>
+                    <input type="password" class="form__input" id="loginPassword" placeholder="Enter password" required>
+                </div>
+                <div class="form__error hidden" id="loginError"></div>
+                <button class="form__submit" id="loginSubmit">Sign In</button>
+                <p class="modal__switch">Don't have an account? <a href="#" id="showRegister">Create one</a></p>
+            </div>
+
+            <div class="modal__form hidden" id="registerForm">
+                <h2 class="modal__title">Create Account</h2>
+                <p class="modal__subtitle">Join Chatalog to save your chat history</p>
+                <div class="form__group">
+                    <label class="form__label" for="registerName">Name</label>
+                    <input type="text" class="form__input" id="registerName" placeholder="Your name" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="registerEmail">Email</label>
+                    <input type="email" class="form__input" id="registerEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="registerPassword">Password</label>
+                    <input type="password" class="form__input" id="registerPassword" placeholder="Min 6 characters" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="registerCard">SPL Library Card (Optional)</label>
+                    <input type="text" class="form__input" id="registerCard" placeholder="Your library card number">
+                </div>
+                <div class="form__error hidden" id="registerError"></div>
+                <button class="form__submit" id="registerSubmit">Create Account</button>
+                <p class="modal__switch">Already have an account? <a href="#" id="showLogin">Sign in</a></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="about-wrapper">
+        <p class="about-eyebrow">Our Story</p>
+        <h1 class="about-title">Welcome to Chatalog,<br>your <em>book recommendation</em> chatbot.</h1>
+        <p class="about-slogan">Your Library. Your Recommendations. A chatbot that can answer it all.</p>
+        <hr class="about-divider">
+
+        <div class="about-body">
+            <p>We are a group of Information Resource Management students at Carleton University with a vision of improving user access to the Seattle Public Library resources. Currently, library websites do not provide a method of searching for book recommendations using artificial intelligence. Whether for research or leisure, our innovative system can recommend your next read from the SPL's catalog by searching for similar books based on title, author, or keyword.</p>
+            <p>The project combines the team's shared background in library science, information management, and information technology with innovative developments in AI-driven search and recommendation systems. Chatalog is an innovative system with the application of emerging technology, combining retrieval augmented generation (RAG), knowledge graphs, and large language models (LLMs) which creates a unique approach to the analysis and interaction with library catalogs. Our chatbot provides personalized, context-aware book recommendations beyond basic catalog searches with an interactive interface for exploring a library's collection.</p>
+            <p>Throughout the exploration of your library resources, Chatalog will be there to help you!</p>
+        </div>
+
+        <div class="about-tags">
+            <span class="about-tag">RAG</span>
+            <span class="about-tag">Knowledge Graphs</span>
+            <span class="about-tag">LLMs</span>
+            <span class="about-tag">Library Science</span>
+            <span class="about-tag">Seattle Public Library</span>
+        </div>
+
+        <div class="about-sign">
+            <p class="about-sign-label">Chatalog Development Team</p>
+            <p class="about-sign-names">Angela, Christian, Hodan, Taqwaa</p>
+            <p class="about-sign-team">Information Resource Management · Carleton University</p>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
 </body>
+</html>

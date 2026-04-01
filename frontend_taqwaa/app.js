@@ -19,7 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     newChatBtn?.addEventListener('click', startNewChat);
     
-    loadChatHistory();
+    // Chat history is loaded by auth.js after checkSession() completes.
+    // This avoids the race condition where Auth.user is still null at this point.
 });
 
 async function loadChatHistory() {

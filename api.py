@@ -262,17 +262,44 @@ async def chat(request: ChatRequest):
         session_id = request.session_id or create_session(request.user_id)
         save_message(session_id, "user", request.message)
         
+        # Fetch conversation history to give the LLM context
+        conversation_history = []
+        with get_history_driver().session(database=DATABASE) as db:
+            history = db.run("""
+                MATCH (c:ChatSession {session_id: $sid})-[:HAS_MESSAGE]->(m:ChatMessage)
+                RETURN m.role AS role, m.content AS content
+                ORDER BY m.timestamp ASC
+            """, sid=session_id).data()
+            conversation_history = [{"role": h["role"], "content": h["content"]} for h in history]
+        
         start = time.time()
         result = get_recommender().recommend(
             query=request.message,
             retrieval_method="smart",
-            limit=request.limit
+            limit=request.limit,
+            conversation_history=conversation_history
         )
         
         print(f"Found {len(result['retrieved_books'])} books in {round(time.time() - start, 2)}s", flush=True)
         
         save_message(session_id, "assistant", result['response'], books=result['retrieved_books'])
-        
+        # Link session to recommended books and user to genres
+        if result['retrieved_books']:
+            book_titles = [b['title'] for b in result['retrieved_books'] if 'title' in b]
+            with get_history_driver().session(database=DATABASE) as db:
+                db.run("""
+                    MATCH (c:ChatSession {session_id: $sid})
+                    UNWIND $titles AS title
+                    MATCH (b:Book {title: title})
+                    MERGE (c)-[:RECOMMENDED]->(b)
+                """, sid=session_id, titles=book_titles)
+                user_id = request.user_id
+                if user_id:
+                    db.run("""
+                        MATCH (u:User {user_id: $uid})
+                        MATCH (c:ChatSession {session_id: $sid})-[:RECOMMENDED]->(b:Book)-[:HAS_SUBJECT]->(g:Genre)
+                        MERGE (u)-[:INTERESTED_IN]->(g)
+                    """, uid=user_id, sid=session_id)
         return ChatResponse(
             success=True,
             response=result['response'],

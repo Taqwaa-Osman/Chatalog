@@ -134,6 +134,11 @@ const Auth = {
                 localStorage.removeItem('chatalog_user');
             }
         }
+        // Always trigger history load after session check, whether logged in or not.
+        // This runs after app.js's DOMContentLoaded has already defined loadChatHistory.
+        if (typeof loadChatHistory === 'function') {
+            loadChatHistory();
+        }
     },
 
     // Open auth modal

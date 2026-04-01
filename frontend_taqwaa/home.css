@@ -31,6 +31,7 @@
     --shadow: 0 2px 4px rgba(0,0,0,0.05);
     --shadow-lg: 0 10px 40px rgba(0,0,0,0.15);
     --transition: 0.2s ease;
+    --header-height: 133px;
 }
 
 /* Reset */
@@ -339,11 +340,11 @@ a:hover { color: var(--primary-dark); }
 }
 
 .card--light { background: var(--bg-light); box-shadow: none; }
-.card__title { font-weight: 600; color: var(--primary); margin-bottom: var(--space-xs); }
+.card__title { font-weight: 600; color: var(--primary); margin-bottom: var(--space-xs); font-family: 'DM Sans', sans-serif; }
 .card__subtitle { font-size: 13px; color: var(--text-light); }
 
 /* Layout */
-.container { display: flex; height: calc(100vh - 133px); }
+.container { display: flex; height: calc(100vh - var(--header-height)); }
 
 /* Sidebar */
 .sidebar {
@@ -427,7 +428,7 @@ a:hover { color: var(--primary-dark); }
     border-bottom: 2px solid var(--border-light);
 }
 
-.main-content__title { font-size: 32px; color: var(--primary); font-weight: 600; }
+.main-content__title { font-size: 32px; color: var(--primary); font-weight: 600; font-family: 'Lora', Georgia, serif; }
 .main-content__chat-area { flex: 1; padding: var(--space-xl); overflow-y: auto; background: var(--bg-white); }
 
 /* Messages */
@@ -523,9 +524,24 @@ a:hover { color: var(--primary-dark); }
     .modal__content { margin: var(--space-md); max-width: calc(100% - 40px); }
 }
 
-/* ========== Explore KG Page ========== */
+/* ========== About Page ========== */
+.about-wrapper { max-width: 760px; margin: 72px auto 96px; padding: 0 32px; }
+.about-eyebrow { font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-light); margin-bottom: 18px; }
+.about-title { font-family: 'Lora', Georgia, serif; font-size: clamp(2rem, 5vw, 3rem); font-weight: 600; line-height: 1.2; color: var(--text); margin: 0 0 16px; }
+.about-title em { font-style: italic; color: var(--primary); }
+.about-slogan { font-family: 'Lora', Georgia, serif; font-style: italic; font-size: 1.05rem; color: var(--text-light); margin-bottom: 40px; }
+.about-divider { width: 48px; height: 2px; background: var(--primary); border: none; margin: 0 0 48px; }
+.about-body { font-family: 'Lora', Georgia, serif; font-size: 1.0625rem; line-height: 1.85; color: var(--text); }
+.about-body p { margin: 0 0 1.6em; }
+.about-body p:first-child::first-letter { font-size: 3.2em; font-weight: 600; float: left; line-height: 0.8; margin: 0.06em 0.1em 0 0; color: var(--primary); font-family: 'Lora', Georgia, serif; }
+.about-tags { display: flex; flex-wrap: wrap; gap: 10px; margin: 40px 0; }
+.about-tag { font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--primary); border: 1px solid var(--border-medium); background: var(--primary-light); padding: 6px 14px; border-radius: 2px; }
+.about-sign { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--border-light); }
+.about-sign-label { font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-light); margin-bottom: 12px; }
+.about-sign-names { font-family: 'Lora', Georgia, serif; font-style: italic; font-size: 1.15rem; color: var(--secondary); line-height: 1.7; }
+.about-sign-team { font-family: 'DM Sans', sans-serif; font-size: 0.85rem; color: var(--text-light); margin-top: 6px; }
 .explore-container {
-    height: calc(100vh - 133px);
+    height: calc(100vh - var(--header-height));
     position: relative;
 }
 

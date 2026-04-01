@@ -7,16 +7,15 @@ class GraphRAGQwen:
     
     STOP_WORDS: Set[str] = {
         # Common words
-        'the', 'a', 'an', 'of', 'in', 'to', 'for', 'are', 'there', 'by', 
-        'with', 'is', 'it', 'as', 'at', 'on', 'are', 'was', 'were', 'does', 'have', 'any',
+        'the', 'a', 'an', 'of', 'in', 'to', 'for', 'are', 'there', 'by',
+        'with', 'is', 'it', 'as', 'at', 'on', 'was', 'were',
         # Pronouns
         'i', 'me', 'my', 'we', 'our', 'you', 'your', 'they', 'them',
         # Library-specific phrases
         'books', 'book', 'does', 'library', 'have', 'catalog', 'catalogue',
-        'seattle', 'public', 'spl', 'have', 'get', 'find', 'looking',
-        'lookingfor', 'looking for', 'show', 
+        'seattle', 'public', 'spl', 'looking', 'lookingfor', 'show',
         # Request words
-        'want', 'need', 'find', 'looking', 'search', 'show', 'give', 'get',
+        'want', 'need', 'find', 'search', 'give', 'get',
         'some', 'about', 'from', 'that', 'this', 'what', 'which', 'who',
         'can', 'could', 'would', 'should', 'will', 'may', 'might',
         'any', 'all', 'more', 'most', 'other', 'new', 'good', 'great',
@@ -357,18 +356,23 @@ class GraphRAGQwen:
         
         return "\n".join(lines)
     
-    def generate_response(self, query: str, context: str, books: List[Dict[str, Any]] = None, stream: bool = False) -> str:
+    def generate_response(self, query: str, context: str, books: List[Dict[str, Any]] = None,
+                          stream: bool = False, conversation_history: List[Dict[str, str]] = None,
+                          intent: str = "keyword") -> str:
         """Generate response using Qwen with Chatalog persona."""
+
+        # Fix #2: determine if this is the first message so we only greet once
+        is_first_message = not conversation_history or len(conversation_history) == 0
+
         if not books:
-            return """Hi! I'm Chatalog, a chatbot for the Seattle Public Library.
+            no_results_msg = "I couldn't find any books matching your request in our catalog.\n\n"
+            no_results_msg += "You can suggest a title for the library to add here:\n"
+            no_results_msg += "https://www.spl.org/books-and-media/suggest-a-title\n\n"
+            no_results_msg += "Or try a different search — maybe with different keywords?"
+            if is_first_message:
+                return "Hi! I'm Chatalog, a chatbot for the Seattle Public Library.\n\n" + no_results_msg
+            return no_results_msg
 
-I couldn't find any books matching your request in our catalog.
-
-You can suggest a title for the library to add here:
-https://www.spl.org/books-and-media/suggest-a-title
-
-Or try a different search - maybe with different keywords?"""
-        
         num_catalog_books = len(books)
         book_list = ""
         for i, book in enumerate(books, 1):
@@ -377,40 +381,77 @@ Or try a different search - maybe with different keywords?"""
                 book_list += f" by {', '.join(book['authors'])}"
             if book.get('genres'):
                 book_list += f" (Genres: {', '.join(book['genres'][:2])})"
-        
-        prompt = f"""You are Chatalog, a friendly chatbot for the Seattle Public Library.
 
-A patron asked: "{query}"
+        # Fix #3: build a flexible prompt based on intent rather than always using rigid 6-step format
+        if intent == "author":
+            task = (
+                f"The patron is looking for books by a specific author. "
+                f"List the {num_catalog_books} books found, grouped naturally. "
+                f"Mention the author and genres briefly for each. Keep it conversational."
+            )
+        elif intent == "similar":
+            task = (
+                f"The patron wants books similar to a title they enjoyed. "
+                f"List the {num_catalog_books} matching books and briefly explain "
+                f"why each one is a good match based on genre or theme. Keep it friendly."
+            )
+        else:
+            task = (
+                f"List the {num_catalog_books} books found and briefly explain "
+                f"why each fits the patron's request. Keep it concise and helpful."
+            )
 
-I found {num_catalog_books} books in our catalog:
+        # Fix #1: only include the greeting in the system prompt for first message
+        greeting_instruction = (
+            'Start your response with: "Hi! I\'m Chatalog, a chatbot for the Seattle Public Library."\n'
+            if is_first_message else
+            "Do not introduce yourself again — the patron already knows who you are.\n"
+        )
+
+        system_prompt = f"""You are Chatalog, a friendly readers' advisory chatbot for the Seattle Public Library.
+{greeting_instruction}
+{task}
+
+Books found in the catalog:
 {book_list}
 
-Write a response that:
-1. Starts with: "Hi! I'm Chatalog, a chatbot for the Seattle Public Library."
-2. Says: "I found {num_catalog_books} books in our catalog that match your request:"
-3. Lists each catalog book with title, author, and a one-sentence description
-4. Then says: "These books are not in our catalog, but you might also enjoy:"
-5. Suggests 3-5 additional books NOT listed above that fit the patron's interest
-6. Ends with: "Want any of these titles added to our collection? Request them here: https://www.spl.org/books-and-media/suggest-a-title"
+Rules:
+- Only reference the books listed above. Do not invent or suggest books outside this list.
+- Be warm, concise, and helpful.
+- Do not repeat the full list verbatim — describe it naturally."""
 
-Keep it friendly and helpful. Do not make up information about the catalog books."""
+        # Fix #2: build full message history for Ollama chat endpoint
+        messages = [{"role": "system", "content": system_prompt}]
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": query})
 
         try:
             if stream:
                 response_parts = []
-                for chunk in ollama.generate(model=self.model_name, prompt=prompt, stream=True, options={"temperature": 0.7}):
-                    text = chunk.get('response', '')
+                for chunk in ollama.chat(model=self.model_name, messages=messages, stream=True,
+                                         options={"temperature": 0.7}):
+                    # Fix #4: handle both object and dict Ollama responses
+                    if hasattr(chunk, 'message'):
+                        text = chunk.message.content or ''
+                    else:
+                        text = chunk.get('message', {}).get('content', '')
                     print(text, end='', flush=True)
                     response_parts.append(text)
                 print()
                 return ''.join(response_parts)
             else:
-                response = ollama.generate(model=self.model_name, prompt=prompt, options={"temperature": 0.7})
-                return response['response']
+                response = ollama.chat(model=self.model_name, messages=messages,
+                                       options={"temperature": 0.7})
+                # Fix #4: handle both object and dict Ollama responses
+                if hasattr(response, 'message'):
+                    return response.message.content
+                return response['message']['content']
         except Exception as e:
             return f"Error generating response: {e}"
     
-    def recommend(self, query: str, retrieval_method: str = "smart", limit: int = 5, stream: bool = False) -> Dict[str, Any]:
+    def recommend(self, query: str, retrieval_method: str = "smart", limit: int = 5,
+                  stream: bool = False, conversation_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
         print(f"\nQuery: {query}", flush=True)
         print(f"Method: {retrieval_method}\n", flush=True)
         
@@ -423,7 +464,11 @@ Keep it friendly and helpful. Do not make up information about the catalog books
         print(f"Found {len(books)} books (method: {method_used})\n", flush=True)
         
         context = self.format_context(books)
-        response = self.generate_response(query, context, books=books, stream=stream)
+        response = self.generate_response(
+            query, context, books=books, stream=stream,
+            conversation_history=conversation_history or [],
+            intent=method_used
+        )
         
         return {
             'query': query,

@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chatalog - Library Catalog Assistant</title>
-    <link rel="stylesheet" href="/home.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="home.css">
 </head>
 <body>
     <!-- Header Navigation -->
@@ -14,8 +17,8 @@
         </div>
         
         <nav class="header__nav">
-            <a href="/AboutUs.html" class="header__nav-link">About Us</a>
-            <a href="/ExploreKG.html" class="header__nav-link">Explore Knowledge Graph</a>
+            <a href="AboutUs.html" class="header__nav-link">About Us</a>
+            <a href="ExploreKG.html" class="header__nav-link">Explore Knowledge Graph</a>
             <a href="https://www.spl.org" class="header__nav-link" target="_blank">Seattle Public Library</a>
         </nav>
         
@@ -142,7 +145,7 @@
                     type="text" 
                     class="main-content__input" 
                     id="messageInput"
-                    placeholder="Ask about books, authors, or library resources..."
+                    placeholder="Ask about books, authors, or genres..."
                     autocomplete="off"
                 />
                 <button class="main-content__send-btn" id="sendBtn">→</button>

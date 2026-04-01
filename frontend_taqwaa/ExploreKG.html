@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Explore Knowledge Graph - Chatalog</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="home.css">
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 </head>
@@ -12,23 +15,86 @@
         <div class="header__logo">
             <img class="header__logo-placeholder" src="chataloglogo.png" alt="Chatalog logo">
         </div>
-        
+
         <nav class="header__nav">
             <a href="home.html" class="header__nav-link">Chat</a>
-            <a href="about.html" class="header__nav-link">About Us</a>
+            <a href="AboutUs.html" class="header__nav-link">About Us</a>
             <a href="ExploreKG.html" class="header__nav-link header__nav-link--active">Explore Knowledge Graph</a>
             <a href="https://www.spl.org/" class="header__nav-link" target="_blank" rel="noopener noreferrer">Seattle Public Library</a>
         </nav>
-        
+
         <div class="header__actions">
-            <a href="#account" class="header__account-link">My Account</a>
+            <a href="#" class="header__account-link" id="loginBtn">My Account</a>
+
+            <div class="header__user-menu hidden" id="userMenu">
+                <button class="header__user-btn" id="userMenuBtn">
+                    <span class="header__user-avatar" id="userAvatar">U</span>
+                    <span class="header__username" id="usernameDisplay">User</span>
+                </button>
+                <div class="header__dropdown hidden" id="userDropdown">
+                    <a href="home.html" class="header__dropdown-item">
+                        <span>💬</span> My Chats
+                    </a>
+                    <hr class="header__dropdown-divider">
+                    <a href="#" class="header__dropdown-item header__dropdown-item--danger" id="logoutBtn">
+                        <span>🚪</span> Sign Out
+                    </a>
+                </div>
+            </div>
         </div>
     </header>
+
+    <div class="modal hidden" id="authModal">
+        <div class="modal__backdrop" id="modalBackdrop"></div>
+        <div class="modal__content">
+            <button class="modal__close" id="modalClose">&times;</button>
+
+            <div class="modal__form" id="loginForm">
+                <h2 class="modal__title">Welcome Back</h2>
+                <p class="modal__subtitle">Sign in to access your chat history</p>
+                <div class="form__group">
+                    <label class="form__label" for="loginEmail">Email</label>
+                    <input type="email" class="form__input" id="loginEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="loginPassword">Password</label>
+                    <input type="password" class="form__input" id="loginPassword" placeholder="Enter password" required>
+                </div>
+                <div class="form__error hidden" id="loginError"></div>
+                <button class="form__submit" id="loginSubmit">Sign In</button>
+                <p class="modal__switch">Don't have an account? <a href="#" id="showRegister">Create one</a></p>
+            </div>
+
+            <div class="modal__form hidden" id="registerForm">
+                <h2 class="modal__title">Create Account</h2>
+                <p class="modal__subtitle">Join Chatalog to save your chat history</p>
+                <div class="form__group">
+                    <label class="form__label" for="registerName">Name</label>
+                    <input type="text" class="form__input" id="registerName" placeholder="Your name" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="registerEmail">Email</label>
+                    <input type="email" class="form__input" id="registerEmail" placeholder="your@email.com" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="registerPassword">Password</label>
+                    <input type="password" class="form__input" id="registerPassword" placeholder="Min 6 characters" required>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="registerCard">SPL Library Card (Optional)</label>
+                    <input type="text" class="form__input" id="registerCard" placeholder="Your library card number">
+                </div>
+                <div class="form__error hidden" id="registerError"></div>
+                <button class="form__submit" id="registerSubmit">Create Account</button>
+                <p class="modal__switch">Already have an account? <a href="#" id="showLogin">Sign in</a></p>
+            </div>
+        </div>
+    </div>
 
     <div class="explore-container">
         <div id="viz"></div>
         <div class="explore-loading" id="loading">Loading graph...</div>
-        
+
         <div class="explore-legend">
             <div class="explore-legend__title">Node Types</div>
             <div class="explore-legend__item">
@@ -60,14 +126,13 @@
             .then(res => res.json())
             .then(data => {
                 document.getElementById('loading').style.display = 'none';
-                document.getElementById('stats').textContent = 
+                document.getElementById('stats').textContent =
                     `${data.nodes.length} nodes • ${data.relationships.length} relationships`;
 
-                // Convert to vis.js format
                 const nodes = data.nodes.map(n => ({
                     id: n.id,
                     label: n.name.length > 20 ? n.name.substring(0, 20) + '...' : n.name,
-                    title: n.name,  // tooltip
+                    title: n.name,
                     color: colors[n.label] || "#888888",
                     font: { color: "#ffffff", size: 10 }
                 }));
@@ -80,9 +145,8 @@
                     arrows: "to"
                 }));
 
-                // Create network
                 const container = document.getElementById('viz');
-                const network = new vis.Network(container, 
+                const network = new vis.Network(container,
                     { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
                     {
                         physics: {
@@ -108,5 +172,7 @@
                 console.error('Error:', err);
             });
     </script>
+
+    <script src="auth.js"></script>
 </body>
 </html>
