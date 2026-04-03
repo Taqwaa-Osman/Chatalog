@@ -8,6 +8,24 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="home.css">
+    <style>
+        .explore-subtitle {
+            position: absolute;
+            top: 72px; /* just below header */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background: rgba(20, 18, 40, 0.82);
+            backdrop-filter: blur(6px);
+            border: 1px solid rgba(155,143,196,0.2);
+            border-radius: 20px;
+            padding: 7px 20px;
+            font-size: 12px;
+            color: #a89ec4;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+    </style>
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 </head>
 <body>
@@ -92,6 +110,9 @@
     </div>
 
     <div class="explore-container">
+        <div class="explore-subtitle">
+            Showing a sample of our fantasy collection — the full Seattle Public Library catalog contains thousands more titles, authors, and connections.
+        </div>
         <div id="viz"></div>
         <div class="explore-loading" id="loading">Loading graph...</div>
 
@@ -104,7 +125,7 @@
                 <span class="explore-legend__color" style="background: #b43444;"></span> Author
             </div>
             <div class="explore-legend__item">
-                <span class="explore-legend__color" style="background: #FF9800;"></span> Subject
+                <span class="explore-legend__color" style="background: #FF9800;"></span> Genre
             </div>
             <div class="explore-legend__item">
                 <span class="explore-legend__color" style="background: #5c3854;"></span> Publisher
@@ -116,56 +137,87 @@
 
     <script>
         const colors = {
-            Book: "#4CAF50",
-            Author: "#b43444",
-            Subject: "#FF9800",
-            Publisher: "#5c3854",
+            Book:      { background: "#4CAF50", border: "#388E3C", highlight: { background: "#66BB6A", border: "#2E7D32" } },
+            Author:    { background: "#b43444", border: "#8B1A28", highlight: { background: "#d45464", border: "#6B0F1A" } },
+            Genre:     { background: "#FF9800", border: "#E65100", highlight: { background: "#FFB74D", border: "#BF360C" } },
+            Publisher: { background: "#5c3854", border: "#3B1F38", highlight: { background: "#7c5874", border: "#2B0F28" } },
         };
 
-        fetch('/api/graph?limit=500')
+        fetch('/api/graph?limit=100')
             .then(res => res.json())
             .then(data => {
                 document.getElementById('loading').style.display = 'none';
-                document.getElementById('stats').textContent =
-                    `${data.nodes.length} nodes • ${data.relationships.length} relationships`;
 
-                const nodes = data.nodes.map(n => ({
-                    id: n.id,
-                    label: n.name.length > 20 ? n.name.substring(0, 20) + '...' : n.name,
-                    title: n.name,
-                    color: colors[n.label] || "#888888",
-                    font: { color: "#ffffff", size: 10 }
+                const bookCount = data.nodes.filter(n => n.label === 'Book').length;
+                document.getElementById('stats').textContent =
+                    `${bookCount} books • ${data.nodes.length} total nodes • ${data.relationships.length} relationships`;
+
+                const nodesDataset = new vis.DataSet(data.nodes.map(n => {
+                    const shortName = n.name.length > 22 ? n.name.substring(0, 22) + '…' : n.name;
+                    // For authors, append birth year to tooltip if available
+                    let tooltip = n.name;
+                    if (n.label === 'Author' && n.birth_date) {
+                        const year = n.birth_date.substring(0, 4);
+                        tooltip = `${n.name} (b. ${year})`;
+                    }
+                    return {
+                        id: n.id,
+                        label: shortName,
+                        title: tooltip,
+                        color: colors[n.label] || { background: "#888", border: "#555" },
+                        font: { color: "#ffffff", size: 10 },
+                    };
                 }));
 
-                const edges = data.relationships.map(r => ({
+                // Edge labels hidden by default; revealed on node selection
+                const edgesDataset = new vis.DataSet(data.relationships.map(r => ({
+                    id: `${r.source}-${r.target}-${r.type}`,
                     from: r.source,
                     to: r.target,
-                    label: r.type,
-                    font: { size: 8, color: "#888888" },
-                    arrows: "to"
-                }));
+                    _type: r.type,
+                    label: '',          // hidden until a node is selected
+                    font: { size: 8, color: "#cccccc", strokeWidth: 2, strokeColor: "#1a1a2e" },
+                    color: { color: "#4a4a6a", highlight: "#9b8fc4", opacity: 0.6 },
+                    arrows: "to",
+                    smooth: { type: "continuous" }
+                })));
 
-                const container = document.getElementById('viz');
-                const network = new vis.Network(container,
-                    { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
+                const network = new vis.Network(
+                    document.getElementById('viz'),
+                    { nodes: nodesDataset, edges: edgesDataset },
                     {
                         physics: {
-                            stabilization: { iterations: 100 },
-                            barnesHut: { gravitationalConstant: -5000, springLength: 150 }
+                            stabilization: { iterations: 200 },
+                            barnesHut: { gravitationalConstant: -8000, springLength: 180, damping: 0.25 }
                         },
-                        interaction: { hover: true, zoomView: true, dragView: true },
-                        nodes: { shape: "dot", size: 16 },
-                        edges: { smooth: { type: "continuous" } }
+                        interaction: {
+                            hover: true,
+                            tooltipDelay: 200,
+                            zoomView: true,
+                            dragView: true,
+                            dragNodes: true,
+                            selectConnectedEdges: true
+                        },
+                        nodes: { shape: "dot", size: 14 },
                     }
                 );
 
-                network.on("click", function(params) {
-                    if (params.nodes.length > 0) {
-                        const nodeId = params.nodes[0];
-                        const node = nodes.find(n => n.id === nodeId);
-                        if (node) alert(node.title);
-                    }
+                // Show edge labels for connected edges on node select; hide on deselect
+                network.on("selectNode", function(params) {
+                    const connectedEdgeIds = network.getConnectedEdges(params.nodes[0]);
+                    const updates = edgesDataset.get().map(e => ({
+                        id: e.id,
+                        label: connectedEdgeIds.includes(e.id) ? e._type : ''
+                    }));
+                    edgesDataset.update(updates);
                 });
+
+                network.on("deselectNode", function() {
+                    edgesDataset.update(edgesDataset.get().map(e => ({ id: e.id, label: '' })));
+                });
+
+                // Suppress any default browser behaviour on canvas clicks
+                network.on("click", function() {});
             })
             .catch(err => {
                 document.getElementById('loading').textContent = 'Failed to load graph';

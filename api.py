@@ -367,58 +367,64 @@ async def get_neo4j_config():
         "database": DATABASE
     }
 
+@app.get("/api/graph/inspect")
+async def inspect_node_properties():
+    """Return the actual property keys on each node type — use this to debug 'Unknown' labels."""
+    results = {}
+    with get_history_driver().session(database=DATABASE) as session:
+        for label in ["Author", "Publisher", "Subject", "Book"]:
+            record = session.run(
+                f"MATCH (n:{label}) RETURN keys(n) AS props, n AS node LIMIT 1"
+            ).single()
+            if record:
+                results[label] = {
+                    "properties": record["props"],
+                    "sample_values": dict(record["node"])
+                }
+    return results
+
 @app.get("/api/graph")
-async def get_graph_data(limit: int = 500):
+async def get_graph_data(limit: int = 100):
     """Fetch graph data for visualization.
 
-    Fetches each relationship type with its own sub-limit so no single
-    type (e.g. WRITTEN_BY) can starve Subject / Publisher nodes out of
-    the response.  All relationship endpoints are guaranteed to exist
-    in the returned nodes list.
+    Book-first approach: pick `limit` books, then collect ALL their
+    relationships in one query.  This guarantees:
+      - Every node in the response has a real name (no 'Unknown')
+      - Every edge's endpoints exist in the node list
+      - The graph stays manageable (limit books → bounded total nodes)
     """
-    per_type = max(50, limit // 4)
-
-    # Single UNION ALL query — one round-trip, each rel type gets its own LIMIT
-    # so no type can starve the others out of the result set.
     cypher = """
-        MATCH (a:Book)-[r:WRITTEN_BY]->(b:Author)
-        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
-               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
-               type(r) AS rel_type
-        LIMIT $lim
-    UNION ALL
-        MATCH (a:Book)-[r:HAS_SUBJECT]->(b:Subject)
-        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
-               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
-               type(r) AS rel_type
-        LIMIT $lim
-    UNION ALL
-        MATCH (a:Book)-[r:PUBLISHED_BY]->(b:Publisher)
-        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
-               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
-               type(r) AS rel_type
-        LIMIT $lim
-    UNION ALL
-        MATCH (a:Book)-[r:HAS_LOCATION]->(b:Location)
-        RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, COALESCE(a.title, a.name, 'Unknown') AS source_name,
-               elementId(b) AS target_id, labels(b)[0] AS target_label, COALESCE(b.title, b.name, 'Unknown') AS target_name,
-               type(r) AS rel_type
-        LIMIT $lim
+        MATCH (b:Book)
+        WITH b LIMIT $limit
+        MATCH (b)-[r]->(connected)
+        WHERE connected:Author OR connected:Genre
+           OR connected:Publisher OR connected:Location
+        RETURN
+            elementId(b)         AS source_id,
+            'Book'               AS source_label,
+            COALESCE(b.title, b.name, '') AS source_name,
+            elementId(connected) AS target_id,
+            labels(connected)[0] AS target_label,
+            COALESCE(connected.name, connected.author, connected.publisher, connected.subject_1, connected.title, '') AS target_name,
+            COALESCE(connected.birth_date, '') AS birth_date,
+            type(r)              AS rel_type
     """
 
     nodes_map: dict = {}
     relationships: list = []
 
     with get_history_driver().session(database=DATABASE) as session:
-        for record in session.run(cypher, lim=per_type):
+        for record in session.run(cypher, limit=limit):
             sid, tid = record["source_id"], record["target_id"]
+            sname = record["source_name"] or "Untitled"
+            tname = record["target_name"] or record["target_label"]  # fall back to type, never blank
+
             if sid not in nodes_map:
-                nodes_map[sid] = {"id": sid, "label": record["source_label"], "name": record["source_name"]}
+                nodes_map[sid] = {"id": sid, "label": record["source_label"], "name": sname}
             if tid not in nodes_map:
-                nodes_map[tid] = {"id": tid, "label": record["target_label"], "name": record["target_name"]}
+                birth_date = record["birth_date"] or ""
+                nodes_map[tid] = {"id": tid, "label": record["target_label"], "name": tname, "birth_date": birth_date}
+
             relationships.append({"source": sid, "target": tid, "type": record["rel_type"]})
 
-    return {
-        "nodes": list(nodes_map.values()),
-        "relationships": relationships
-    }
+    return {"nodes": list(nodes_map.values()), "relationships": relationships}
