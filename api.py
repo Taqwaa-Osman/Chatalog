@@ -296,7 +296,7 @@ async def chat(request: ChatRequest):
         result = get_recommender().recommend(
             query=request.message,
             retrieval_method="smart",
-            limit=min(request.limit, 5),
+            limit=request.limit,
             conversation_history=conversation_history
         )
         
