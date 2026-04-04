@@ -336,9 +336,9 @@ async def chat(request: ChatRequest):
             response_time=round(time.time() - start, 2),
             session_id=session_id
         )
-    except Exception as e:
-        print(f"Error: {e}", flush=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            print(f"Error: {e}", flush=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/sessions")
 async def get_sessions(limit: int = 20):
