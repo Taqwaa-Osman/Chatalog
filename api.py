@@ -266,13 +266,13 @@ async def health():
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     if not is_valid_query(request.message):
-    session_id = request.session_id or create_session(request.user_id)
-    return ChatResponse(
-        success=True,
-        response="I’m not sure I understood that. Could you rephrase your request for book recommendations?",
-        books=[],
-        session_id=session_id
-    )
+        session_id = request.session_id or create_session(request.user_id)
+        return ChatResponse(
+            success=True,
+            response="I’m not sure I understood that. Could you rephrase your request for book recommendations?",
+            books=[],
+            session_id=session_id
+        )
     
     print(f"\nQuery: {request.message}", flush=True)
     print(f"User ID: {request.user_id or 'anonymous'}", flush=True)
@@ -309,7 +309,7 @@ async def chat(request: ChatRequest):
                 response=f"I couldn't find exact matches for '{request.message}', but try simplifying your request or changing keywords.",
                 books=[],
                 session_id=session_id
-        )
+            )
         
         save_message(session_id, "assistant", result['response'], books=result['retrieved_books'])
         # Link session to recommended books and user to genres
