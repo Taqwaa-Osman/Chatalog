@@ -193,8 +193,14 @@ function addMessage(text, role, books = null, animate = true) {
             const card = document.createElement('div');
             card.className = 'card card--light';
             card.style.cssText = 'flex:1;min-width:180px;max-width:250px;';
+            const title = book.title || 'Unknown';
+            const link = getSPLLink(title);
             card.innerHTML = `
-                <div class="card__title">${escapeHtml(book.title || 'Unknown')}</div>
+                <div class="card__title">
+                    <a href="${link}" target="_blank" style="text-decoration:none;color:inherit;cursor:pointer;">
+                        ${escapeHtml(title)}
+                    </a>
+                </div>
                 ${book.authors?.length ? `<div class="card__subtitle">by ${escapeHtml(book.authors.join(', '))}</div>` : ''}
             `;
             grid.appendChild(card);
@@ -229,3 +235,9 @@ function getTimeAgo(date) {
 
 // Export for auth.js to use
 window.loadChatHistory = loadChatHistory;
+
+function getSPLLink(title) {
+    if (!title) return '#';
+    const query = encodeURIComponent(title);
+    return `https://seattle.bibliocommons.com/v2/search?query=${query}&searchType=smart`;
+}
