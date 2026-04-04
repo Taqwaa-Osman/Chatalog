@@ -39,7 +39,6 @@ def get_authors(tx):
     MATCH (a:Author)
     WHERE a.wikidata_id IS NULL
     RETURN a.author AS name
-    LIMIT 20
     """
     return [record["name"] for record in tx.run(query)]
 
