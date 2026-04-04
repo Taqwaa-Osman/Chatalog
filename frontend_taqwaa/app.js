@@ -178,6 +178,7 @@ function addMessage(text, role, books = null, animate = true) {
     
     const content = document.createElement('div');
     content.className = 'message__content';
+    const cleanText = text.replace(/\*\*/g, '');
     content.innerHTML = escapeHtml(text)
         .replace(/\n/g, '<br>')
         .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
