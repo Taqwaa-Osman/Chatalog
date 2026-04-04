@@ -66,6 +66,20 @@ history_driver = None
 
 # ============== Helpers ==============
 
+def is_valid_query(message: str) -> bool:
+    if len(message.strip()) < 3:
+        return False
+
+    # must contain letters
+    if not any(c.isalpha() for c in message):
+        return False
+
+    # too long = likely garbage
+    if len(message) > 300:
+        return False
+
+    return True
+
 def hash_password(password: str) -> str:
     """Hash password with salt"""
     salt = "chatalog_salt_2024"
@@ -251,8 +265,14 @@ async def health():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    if not request.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    if not is_valid_query(request.message):
+    session_id = request.session_id or create_session(request.user_id)
+    return ChatResponse(
+        success=True,
+        response="I’m not sure I understood that. Could you rephrase your request for book recommendations?",
+        books=[],
+        session_id=session_id
+    )
     
     print(f"\nQuery: {request.message}", flush=True)
     print(f"User ID: {request.user_id or 'anonymous'}", flush=True)
@@ -276,11 +296,20 @@ async def chat(request: ChatRequest):
         result = get_recommender().recommend(
             query=request.message,
             retrieval_method="smart",
-            limit=request.limit,
+            limit=min(request.limit, 5),
             conversation_history=conversation_history
         )
         
         print(f"Found {len(result['retrieved_books'])} books in {round(time.time() - start, 2)}s", flush=True)
+
+        # Handle empty results better
+        if not result.get('retrieved_books'):
+            return ChatResponse(
+                success=True,
+                response=f"I couldn't find exact matches for '{request.message}', but try simplifying your request or changing keywords.",
+                books=[],
+                session_id=session_id
+        )
         
         save_message(session_id, "assistant", result['response'], books=result['retrieved_books'])
         # Link session to recommended books and user to genres
