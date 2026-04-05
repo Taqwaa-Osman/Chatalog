@@ -11,4 +11,4 @@ Setup Instructions
    
 4. Start the server:
    - uvicorn api:app --reload
-   - Then open http://localhost:8000 in your browser.
+   - Then open http://127.0.0.1:8000 in your browser (Press CTRL+C to quit)
