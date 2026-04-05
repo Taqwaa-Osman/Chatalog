@@ -197,7 +197,7 @@ function addMessage(text, role, books = null, animate = true) {
             const link = getSPLLink(title);
             card.innerHTML = `
                 <div class="card__title">
-                    <a href="${link}" target="_blank" style="text-decoration:none;color:inherit;cursor:pointer;">
+                    <a href="${link}" target="_blank">
                         ${escapeHtml(title)}
                     </a>
                 </div>
