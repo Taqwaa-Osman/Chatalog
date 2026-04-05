@@ -195,11 +195,13 @@ function addMessage(text, role, books = null, animate = true) {
             card.style.cssText = 'flex:1;min-width:180px;max-width:250px;';
             const title = book.title || 'Unknown';
             const link = getSPLLink(title);
+            card.onclick = () => {
+                window.open(link, '_blank');
+            };
+            card.style.cursor = 'pointer';
             card.innerHTML = `
                 <div class="card__title">
-                    <a href="${link}" target="_blank">
-                        ${escapeHtml(title)}
-                    </a>
+                    ${escapeHtml(title)}
                 </div>
                 ${book.authors?.length ? `<div class="card__subtitle">by ${escapeHtml(book.authors.join(', '))}</div>` : ''}
             `;
