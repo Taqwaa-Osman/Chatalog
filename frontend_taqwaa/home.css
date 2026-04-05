@@ -609,13 +609,30 @@ a:hover { color: var(--primary-dark); }
 }
 
 .card {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.card::after {
+    content: "View in Library →";
+    position: absolute;
+    bottom: 10px;
+    right: 12px;
+    font-size: 12px;
+    color: var(--primary);
+    opacity: 0;
+    transform: translateY(6px);
+    transition: all 0.25s ease;
+}
+
+.card:hover::after {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .card:hover {
-    transform: translateY(-6px) scale(1.02);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+    transform: translateY(-6px) scale(1.01);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.15);
 }
 
 .card__title {
@@ -640,4 +657,37 @@ a:hover { color: var(--primary-dark); }
 
 .card:hover .card__title {
     color: var(--primary);
+}
+
+.message--assistant .message__content {
+    position: relative;
+    background: var(--bg-light);
+    border-left: 3px solid var(--primary);
+}
+
+.message--assistant .message__content::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(120deg, transparent, rgba(0,123,127,0.08), transparent);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.message--assistant:hover .message__content::before {
+    opacity: 1;
+}
+
+.message__content {
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(0,0,0,0.03);
+}
+
+.message--user .message__content {
+    box-shadow: 0 4px 12px rgba(0,123,127,0.2);
+}
+
+.message--assistant .message__content {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
