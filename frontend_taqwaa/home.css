@@ -607,3 +607,13 @@ a:hover { color: var(--primary-dark); }
     color: var(--text-light);
     z-index: 10;
 }
+
+.card__title a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.card__title a:hover {
+    text-decoration: underline;
+    cursor: pointer;
+}
