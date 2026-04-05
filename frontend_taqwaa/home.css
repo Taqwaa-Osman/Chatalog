@@ -608,12 +608,37 @@ a:hover { color: var(--primary-dark); }
     z-index: 10;
 }
 
+.card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
 .card__title a {
     color: inherit;
     text-decoration: none;
+    cursor: pointer;
+    position: relative;
 }
 
-.card__title a:hover {
-    text-decoration: underline;
-    cursor: pointer;
+.card__title a::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    width: 0%;
+    height: 2px;
+    background-color: currentColor;
+    transition: width 0.25s ease;
+}
+
+.card__title a:hover::after {
+    width: 100%;
+}
+
+.card:hover .card__title a {
+    color: var(--primary-color, #2e7d32); /* fallback green */
 }
