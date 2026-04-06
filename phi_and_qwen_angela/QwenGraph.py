@@ -24,7 +24,6 @@ class GraphRAGQwen:
         'please', 'help', 'tell', 'list'
     }
 
-    # Filler phrases that trail after a book title or author name
     _TRAILING_FILLER = re.compile(
         r'\s+(please|thanks|thank you|can you|could you|for me|i think|'
         r'i loved it|i enjoyed it|i really loved|i really enjoyed|'
@@ -32,6 +31,22 @@ class GraphRAGQwen:
         r'type of books?|kind of books?|sort of books?).*$',
         re.IGNORECASE
     )
+
+    _MARC_NOISE = re.compile(
+        r'\b(fictitious character|imaginary organization|comic books? strips? etc|'
+        r'juvenile literature|juvenile delinquents|fictitious characters|'
+        r'graphic novels|history and criticism|exhibitions|'
+        r'social life and customs|personal narratives)\b',
+        re.IGNORECASE
+    )
+
+    _GENRE_KEYWORDS = [
+        'fantasy', 'science fiction', 'mystery', 'thriller', 'horror',
+        'romance', 'historical fiction', 'adventure', 'juvenile fiction',
+        'juvenile literature', 'young adult fiction', 'graphic novel',
+        'nonfiction', 'biography', 'poetry', 'short stories',
+        'fiction', 'humor', 'satire', 'drama',
+    ]
 
     def __init__(self, neo4j_uri: str, neo4j_user: str, neo4j_password: str, database: str = "neo4j"):
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
@@ -81,13 +96,13 @@ class GraphRAGQwen:
     def _clean_author(self, author: str) -> str:
         """
         Normalize author names from database format.
-        "Patterson, James" -> "James Patterson"
-        "Maas, Sarah J."   -> "Sarah J. Maas"
+        "Patterson, James, 1947-" -> "James Patterson"
+        "Maas, Sarah J."          -> "Sarah J. Maas"
         """
         if not author:
             return ''
         author = author.strip()
-        # Handle "Surname, Firstname" format
+        author = re.sub(r',?\s*\d{4}-\d{0,4}', '', author).strip()
         if ',' in author:
             parts = [p.strip() for p in author.split(',', 1)]
             if len(parts) == 2 and parts[1]:
@@ -95,23 +110,37 @@ class GraphRAGQwen:
         return author
 
     def _clean_genre(self, genre: str) -> str:
-        """Clean up genre/subject strings from the database."""
+        """Extract a clean genre label from messy MARC subject heading strings."""
         if not genre:
             return ''
-        # Remove anything in parentheses e.g. "Fiction (Fantasy)"
         genre = re.sub(r'\(.*?\)', '', genre).strip()
-        # Title-case and strip trailing punctuation
-        genre = genre.strip('.,;:').strip()
-        return genre if genre else ''
+        genre_lower = genre.lower()
+
+        for kw in sorted(self._GENRE_KEYWORDS, key=len, reverse=True):
+            if kw in genre_lower:
+                return kw.title()
+
+        words = genre.split()
+        if len(words) <= 3 and not self._MARC_NOISE.search(genre):
+            return genre.strip('.,;:').strip()
+
+        return ''
 
     def _clean_books(self, books: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Clean author names and genre strings on a list of books."""
         cleaned = []
         for book in books:
+            clean_genres = [self._clean_genre(g) for g in book.get('genres', []) if g]
+            seen = set()
+            deduped_genres = []
+            for g in clean_genres:
+                if g and g not in seen:
+                    seen.add(g)
+                    deduped_genres.append(g)
             cleaned.append({
                 **book,
                 'authors': [self._clean_author(a) for a in book.get('authors', []) if a],
-                'genres':  [self._clean_genre(g)  for g in book.get('genres', [])  if g],
+                'genres': deduped_genres,
             })
         return cleaned
 
@@ -120,21 +149,14 @@ class GraphRAGQwen:
     # -----------------------------------------------------------------------
 
     def _clean_term(self, term: str) -> str:
-        """
-        Clean an extracted author name or book title.
-        Stop at the first comma, question mark, or exclamation mark.
-        Remove trailing filler phrases like "please", "i loved it", etc.
-        """
         term = re.split(r'[,?!]', term)[0]
         term = self._TRAILING_FILLER.sub('', term)
         term = re.sub(r'[^\w\s\'-]', '', term).strip()
         return term
 
     def _parse_query_intent(self, query: str) -> Tuple[str, str]:
-        """Detect query intent: similar, author, or keyword."""
         query_lower = query.lower().strip()
 
-        # --- Similar intent ---
         similar_patterns = [
             r'(?:books?\s+)?(?:like|similar\s+to|such\s+as)\s+(.+)',
             r'(?:recommend\s+)?(?:something|books?)\s+like\s+(.+)',
@@ -148,7 +170,6 @@ class GraphRAGQwen:
                 if term:
                     return ("similar", term)
 
-        # --- Author intent ---
         author_patterns = [
             r'(?:books?\s+)?(?:written\s+by|authored\s+by|by)\s+(.+)',
             r"(.+?)'s\s+books?",
@@ -166,13 +187,6 @@ class GraphRAGQwen:
         return ("keyword", query)
 
     def _parse_query_logic(self, query: str) -> tuple:
-        """
-        Parse AND/OR logic from query.
-
-        "magic AND dragons" -> (["magic", "dragons"], "AND")
-        "witches OR wizards" -> (["witches", "wizards"], "OR")
-        "fantasy adventure"  -> (["fantasy", "adventure"], "OR")
-        """
         query_upper = query.upper()
 
         if " AND " in query_upper:
@@ -188,15 +202,12 @@ class GraphRAGQwen:
             return keywords, "OR"
 
     def _filter_keywords(self, query: str) -> List[str]:
-        """Filter out stop words, punctuation, and normalize keywords."""
-        # Strip all punctuation before splitting so "fantasy?" becomes "fantasy"
         query_clean = re.sub(r'[^\w\s]', ' ', query.lower())
         words = query_clean.split()
         keywords = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
         if not keywords:
             keywords = [w for w in words if len(w) > 2][:3]
 
-        # Add singular/plural variants
         expanded = []
         for kw in (keywords if keywords else words[:3]):
             expanded.append(kw)
@@ -212,7 +223,6 @@ class GraphRAGQwen:
     # -----------------------------------------------------------------------
 
     def retrieve_books_by_keyword(self, query: str, limit: int = 10, debug: bool = False) -> List[Dict[str, Any]]:
-        """Core method: Keyword search with AND/OR logic."""
         keywords, logic = self._parse_query_logic(query)
 
         if not keywords:
@@ -283,7 +293,6 @@ class GraphRAGQwen:
             return books[:limit]
 
     def retrieve_books_by_author(self, author_name: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Find books by author with name matching."""
         cleaned = author_name.lower().replace('.', ' ').replace(',', ' ')
         words = [p.strip() for p in cleaned.split() if len(p.strip()) > 0]
 
@@ -340,7 +349,6 @@ class GraphRAGQwen:
             return books
 
     def retrieve_similar_books(self, book_title: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Find books similar to given title via graph traversal."""
         keywords = self._filter_keywords(book_title)
 
         if not keywords:
@@ -397,7 +405,6 @@ class GraphRAGQwen:
             } for r in result if r['title']]
 
     def smart_retrieve(self, query: str, limit: int = 5, debug: bool = True) -> Tuple[List[Dict[str, Any]], str]:
-        """Smart retrieval based on query intent."""
         intent, term = self._parse_query_intent(query)
 
         if debug:
@@ -428,13 +435,137 @@ class GraphRAGQwen:
         return "\n".join(lines)
 
     # -----------------------------------------------------------------------
-    # Response generation
+    # Description generation — Qwen's ONLY job
+    # -----------------------------------------------------------------------
+
+    def _get_descriptions(self, query: str, books: List[Dict[str, Any]],
+                          conversation_history: List[Dict[str, str]],
+                          intent: str) -> List[str]:
+        """
+        Ask Qwen for a short 2-3 sentence blurb per book.
+        Genre info must be woven naturally into the description.
+        Qwen never outputs titles — it only writes the blurbs.
+        """
+        numbered = "\n".join(
+            f"{i}. \"{b['title']}\" "
+            f"(genres: {', '.join(b['genres'][:3]) if b.get('genres') else 'general fiction'})"
+            for i, b in enumerate(books, 1)
+        )
+
+        if intent == "author":
+            task = "The patron is looking for books by a specific author."
+        elif intent == "similar":
+            task = "The patron wants books similar to one they enjoyed."
+        else:
+            task = "The patron is searching for books matching their interests."
+
+        prompt = (
+            f"A library patron asked: \"{query}\"\n"
+            f"{task}\n\n"
+            f"For each book below, write 2 to 3 sentences that:\n"
+            f"- Describe what the book is about in an engaging way\n"
+            f"- Naturally mention the genre or feel of the book without using the word 'genre'\n"
+            f"- Explain briefly why it suits the patron's request\n\n"
+            f"Return ONLY a numbered list — one blurb per book, nothing else.\n"
+            f"Do not repeat the book title in your response. "
+            f"Do not add extra books. Do not use asterisks or markdown.\n\n"
+            f"Books:\n{numbered}"
+        )
+
+        try:
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=prompt,
+                options={"temperature": 0.6}
+            )
+            if isinstance(response, dict):
+                raw = response.get('response', '')
+            else:
+                raw = getattr(response, 'response', '') or ''
+
+            raw = raw.replace('**', '').replace('*', '').replace('##', '')
+
+            # Parse numbered entries — each may span multiple lines
+            descriptions = []
+            current = []
+            for line in raw.strip().splitlines():
+                line = line.strip()
+                if re.match(r'^\d+[\.\)]\s+', line):
+                    if current:
+                        descriptions.append(' '.join(current).strip())
+                    # Strip the leading number
+                    current = [re.sub(r'^\d+[\.\)]\s+', '', line)]
+                elif line and current:
+                    current.append(line)
+            if current:
+                descriptions.append(' '.join(current).strip())
+
+            while len(descriptions) < len(books):
+                descriptions.append('')
+
+            return descriptions[:len(books)]
+
+        except Exception as e:
+            print(f"  Description generation failed: {e}", flush=True)
+            return ['' for _ in books]
+
+    # -----------------------------------------------------------------------
+    # Intro line generation — warm filler before the count
+    # -----------------------------------------------------------------------
+
+    def _get_intro(self, query: str, intent: str, num_books: int,
+                   conversation_history: List[Dict[str, str]]) -> str:
+        """
+        Ask Qwen for a short 1-2 sentence warm intro that fits the query,
+        to appear before 'I found X books in our catalog'.
+        """
+        if intent == "author":
+            context = "The patron is looking for books by a specific author."
+        elif intent == "similar":
+            context = "The patron wants books similar to one they have enjoyed."
+        else:
+            context = "The patron is searching for books on a topic they are interested in."
+
+        prompt = (
+            f"A library patron asked: \"{query}\"\n"
+            f"{context}\n\n"
+            f"Write 1 to 2 warm, friendly sentences acknowledging their request before "
+            f"a list of results is shown. Do not mention how many books were found. "
+            f"Do not list any book titles. Do not use asterisks or markdown. "
+            f"Keep it brief and natural, like a helpful librarian would say."
+        )
+
+        try:
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=prompt,
+                options={"temperature": 0.7}
+            )
+            if isinstance(response, dict):
+                raw = response.get('response', '')
+            else:
+                raw = getattr(response, 'response', '') or ''
+
+            raw = raw.replace('**', '').replace('*', '').replace('##', '').strip()
+            # Only keep first 2 sentences max
+            sentences = re.split(r'(?<=[.!?])\s+', raw)
+            return ' '.join(sentences[:2]).strip()
+
+        except Exception:
+            return "Great question — let me check what we have in our catalog for you."
+
+    # -----------------------------------------------------------------------
+    # Response generation — Python assembles the final string
     # -----------------------------------------------------------------------
 
     def generate_response(self, query: str, context: str, books: List[Dict[str, Any]] = None,
                           stream: bool = False, conversation_history: List[Dict[str, str]] = None,
                           intent: str = "keyword") -> str:
-        """Generate response using Qwen with Chatalog persona."""
+        """
+        Python assembles the entire formatted response.
+        Qwen writes the intro filler and per-book blurbs only.
+        Titles and authors always come from Neo4j.
+        """
 
         is_first_message = not conversation_history or len(conversation_history) == 0
 
@@ -447,91 +578,47 @@ class GraphRAGQwen:
                 return "Hi! I'm Chatalog, a chatbot for the Seattle Public Library.\n\n" + no_results_msg
             return no_results_msg
 
-        # Clean up data from the database before passing to Qwen
+        # Clean data from the database
         books = self._clean_books(books)
-
         num_catalog_books = len(books)
 
-        # Build the book list from cleaned database values only
-        book_list = ""
-        for i, book in enumerate(books, 1):
-            book_list += f"\n{i}. {book.get('title', 'Unknown')}"
-            if book.get('authors'):
-                book_list += f" by {', '.join(book['authors'])}"
-            if book.get('genres'):
-                book_list += f" (Genres: {', '.join(book['genres'][:2])})"
+        # Get per-book blurbs and the intro line from Qwen
+        descriptions = self._get_descriptions(query, books, conversation_history or [], intent)
+        intro = self._get_intro(query, intent, num_catalog_books, conversation_history or [])
 
-        if intent == "author":
-            task = (
-                f"The patron is looking for books by a specific author. "
-                f"List the {num_catalog_books} books found, grouped naturally. "
-                f"Mention the author and genres briefly for each. Keep it conversational."
-            )
-        elif intent == "similar":
-            task = (
-                f"The patron wants books similar to a title they enjoyed. "
-                f"List the {num_catalog_books} matching books and briefly explain "
-                f"why each one is a good match based on genre or theme. Keep it friendly."
-            )
-        else:
-            task = (
-                f"List the {num_catalog_books} books found and briefly explain "
-                f"why each fits the patron's request. Keep it concise and helpful."
-            )
+        # --- Assemble the response entirely in Python ---
+        lines = []
 
-        greeting_instruction = (
-            'Start your response with: "Hi! I\'m Chatalog, a chatbot for the Seattle Public Library."\n'
-            if is_first_message else
-            "Do not introduce yourself again — the patron already knows who you are.\n"
+        if is_first_message:
+            lines.append("Hi! I'm Chatalog, a chatbot for the Seattle Public Library.")
+            lines.append("")
+
+        lines.append(intro)
+        lines.append("")
+        lines.append(
+            f"I found {num_catalog_books} book{'s' if num_catalog_books != 1 else ''} "
+            f"in our catalog that match your request:"
         )
+        lines.append("")
 
-        system_prompt = f"""You are Chatalog, a friendly readers' advisory chatbot for the Seattle Public Library.
-{greeting_instruction}
-{task}
+        for i, (book, desc) in enumerate(zip(books, descriptions), 1):
+            title   = book.get('title', 'Unknown')
+            authors = ', '.join(book['authors']) if book.get('authors') else 'Unknown author'
 
-Books found in the catalog:
-{book_list}
+            lines.append(f"{i}. {title} by {authors}")
 
-Rules:
-- Only reference the books listed above. Do not invent or suggest books outside this list.
-- Use only the titles, authors, and genres as written above — do not alter or replace them.
-- Be warm, concise, and helpful.
-- Do not repeat the full list verbatim — describe each book naturally with a short synopsis and its genre.
-- Do not use any markdown formatting. No asterisks, no hashes, no bullet symbols."""
+            if desc:
+                lines.append(f"   {desc}")
 
-        messages = [{"role": "system", "content": system_prompt}]
-        if conversation_history:
-            messages.extend(conversation_history)
-        messages.append({"role": "user", "content": query})
+            lines.append("")
 
-        try:
-            if stream:
-                response_parts = []
-                for chunk in ollama.chat(model=self.model_name, messages=messages, stream=True,
-                                         options={"temperature": 0.7}):
-                    if hasattr(chunk, 'message'):
-                        text = chunk.message.content or ''
-                    else:
-                        text = chunk.get('message', {}).get('content', '')
-                    print(text, end='', flush=True)
-                    response_parts.append(text)
-                print()
-                response_text = ''.join(response_parts)
-            else:
-                response = ollama.chat(model=self.model_name, messages=messages,
-                                       options={"temperature": 0.7})
-                if hasattr(response, 'message'):
-                    response_text = response.message.content
-                else:
-                    response_text = response['message']['content']
+        lines.append(
+            "If you don't see what you're looking for, you can suggest a title "
+            "for the library to add here:"
+        )
+        lines.append("https://www.spl.org/books-and-media/suggest-a-title")
 
-            # Strip markdown formatting Qwen may have added despite instructions
-            response_text = response_text.replace('**', '').replace('*', '').replace('##', '').replace('# ', '')
-
-            return response_text
-
-        except Exception as e:
-            return f"Error generating response: {e}"
+        return "\n".join(lines)
 
     # -----------------------------------------------------------------------
     # Public interface
