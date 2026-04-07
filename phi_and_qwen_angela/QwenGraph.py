@@ -229,149 +229,130 @@ class GraphRAGQwen:
     # -----------------------------------------------------------------------
 
     def retrieve_books_by_keyword(self, query: str, limit: int = 10, debug: bool = False) -> List[Dict[str, Any]]:
-        keywords, logic = self._parse_query_logic(query)
+    keywords, logic = self._parse_query_logic(query)
 
-        if not keywords:
-            if debug:
-                print(f"  No keywords extracted from: {query}", flush=True)
-            return []
-
+    if not keywords:
         if debug:
-            print(f"  Keywords: {keywords} (logic: {logic})", flush=True)
+            print(f"  No keywords extracted from: {query}", flush=True)
+        return []
 
-        with self.driver.session(database=self.database) as session:
-            result = session.run("""
-                MATCH (b:Book)
-                OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
-                OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
-                WITH 
-                    b,
-                    collect(DISTINCT a.author) AS authors_rel,
-                    collect(DISTINCT g.subject_1) AS genres_rel,
-                    coalesce(b.author, "") AS author_wiki,
-                    coalesce(b.genre, "") AS genre_wiki,
-                    coalesce(b.subject, "") AS subject_wiki,
-                    coalesce(b.language, "") AS language_wiki,
-                    toLower(b.title) AS title_lower
-                WITH 
-                    b,
-                    authors_rel + CASE WHEN author_wiki <> "" THEN [author_wiki] ELSE [] END AS authors,
-                    genres_rel + 
-                        CASE WHEN genre_wiki <> "" THEN [genre_wiki] ELSE [] END +
-                        CASE WHEN subject_wiki <> "" THEN [subject_wiki] ELSE [] END AS genres,
-                    title_lower,
-                    toLower(language_wiki) AS language_lower
-                WHERE ANY(keyword IN $keywords WHERE
-                    title_lower CONTAINS keyword OR
-                    ANY(g IN genres WHERE toLower(g) CONTAINS keyword) OR
-                    language_lower CONTAINS keyword
-                )
-                RETURN 
-                    b.title AS title,
-                    authors,
-                    genres
-                LIMIT 500
-            """, keywords=keywords).data()
-            
-            if debug:
-                print(f"  Stage 1 (CONTAINS): {len(result)} candidates", flush=True)
+    if debug:
+        print(f"  Keywords: {keywords} (logic: {logic})", flush=True)
 
-            books = []
-            for record in result:
-                title = record['title'] or ''
-                authors = [a for a in record['authors'] if a]
-                genres = [g for g in record['genres'] if g]
+    with self.driver.session(database=self.database) as session:
+        result = session.run("""
+            MATCH (b:Book)
+            OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
+            OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
+            WITH 
+                b,
+                collect(DISTINCT a.author) AS authors_rel,
+                collect(DISTINCT g.subject_1) AS genres_rel,
+                // --- ENRICHMENT ---
+                coalesce(b.author, "") AS author_wiki,
+                coalesce(b.genre, "") AS genre_wiki,
+                coalesce(b.subject, "") AS subject_wiki,
+                coalesce(b.language, "") AS language_wiki,
+                toLower(b.title) AS title_lower
+            WITH 
+                b,
+                // --- FIX: merge graph + wikidata authors ---
+                authors_rel + CASE WHEN author_wiki <> "" THEN [author_wiki] ELSE [] END AS authors,
+                // --- FIX: merge ALL enriched metadata ---
+                genres_rel + 
+                    CASE WHEN genre_wiki <> "" THEN [genre_wiki] ELSE [] END +
+                    CASE WHEN subject_wiki <> "" THEN [subject_wiki] ELSE [] END AS genres,
+                title_lower,
+                toLower(language_wiki) AS language_lower
+            WHERE ANY(keyword IN $keywords WHERE
+                title_lower CONTAINS keyword OR
+                ANY(g IN genres WHERE toLower(g) CONTAINS keyword) OR
+                ANY(a IN authors WHERE toLower(a) CONTAINS keyword) OR
+                language_lower CONTAINS keyword
+            )
+            RETURN 
+                b.title AS title,
+                authors,
+                genres
+            LIMIT 500
+        """, keywords=keywords).data()
 
-                search_text = title.lower()
-                for g in genres:
-                    search_text += ' ' + g.lower()
-                for a in authors:
-                    search_text += ' ' + a.lower()
-                    
-                matches = 0
-                for kw in keywords:
-                    pattern = r'\b' + re.escape(kw) + r'\b'
-                    if re.search(pattern, search_text):
-                        matches += 1
+        books = []
 
-                if logic == "AND" and matches < len(keywords):
-                    continue
-                if logic == "OR" and matches == 0:
-                    continue
+        for record in result:
+            title = record.get('title') or ''
+            authors = [a for a in (record.get('authors') or []) if a]
+            genres = [g for g in (record.get('genres') or []) if g]
 
-                books.append({
-                    'title': title,
-                    'authors': authors,
-                    'genres': genres,
-                    'relevance': matches
-                })
+            search_text = f"{title.lower()} {' '.join(a.lower() for a in authors)} {' '.join(g.lower() for g in genres)}"
 
-            books.sort(key=lambda x: x['relevance'], reverse=True)
+            matches = 0
+            score = 0
 
-            if debug:
-                print(f"  Stage 2 (word boundary): {len(books)} matches", flush=True)
+            for kw in keywords:
+                if re.search(r'\b' + re.escape(kw) + r'\b', title.lower()):
+                    matches += 1
+                    score += 3  # --- FIX: title weight ---
+                elif any(kw in g.lower() for g in genres):
+                    matches += 1
+                    score += 2  # --- FIX: genre weight ---
+                elif any(kw in a.lower() for a in authors):
+                    matches += 1
+                    score += 1  # --- FIX: author weight ---
 
-            return books[:limit]
+            if logic == "AND" and matches < len(keywords):
+                continue
+            if logic == "OR" and matches == 0:
+                continue
+
+            books.append({
+                'title': title,
+                'authors': authors,
+                'genres': genres,
+                'relevance': score  # --- FIX: better ranking ---
+            })
+
+        books.sort(key=lambda x: x['relevance'], reverse=True)
+        return books[:limit]
 
     def retrieve_books_by_author(self, author_name: str, limit: int = 10) -> List[Dict[str, Any]]:
-        cleaned = author_name.lower().replace('.', ' ').replace(',', ' ')
-        words = [p.strip() for p in cleaned.split() if len(p.strip()) > 0]
+    cleaned = author_name.lower().replace('.', ' ').replace(',', ' ')
+    words = [p.strip() for p in cleaned.split() if p.strip()]
 
-        name_parts = []
-        for word in words:
-            if len(word) <= 3 and word.isalpha():
-                name_parts.extend(list(word))
-            else:
-                name_parts.append(word)
+    surname = max(words, key=len) if words else author_name.lower()
 
-        if not name_parts:
-            name_parts = [author_name.lower().strip()]
+    with self.driver.session(database=self.database) as session:
+        result = session.run("""
+            MATCH (b:Book)
+            OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
+            OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
+            WITH 
+                b,
+                collect(DISTINCT a.author) AS authors_rel,
+                collect(DISTINCT g.subject_1) AS genres_rel,
+                // --- ENRICHMENT ---
+                coalesce(b.author, "") AS author_wiki,
+                coalesce(b.genre, "") AS genre_wiki,
+                coalesce(b.subject, "") AS subject_wiki
+            WITH 
+                b,
+                authors_rel + CASE WHEN author_wiki <> "" THEN [author_wiki] ELSE [] END AS authors,
+                genres_rel + 
+                    CASE WHEN genre_wiki <> "" THEN [genre_wiki] ELSE [] END +
+                    CASE WHEN subject_wiki <> "" THEN [subject_wiki] ELSE [] END AS genres
+            WHERE ANY(a IN authors WHERE toLower(a) CONTAINS $surname)
+            RETURN 
+                b.title AS title,
+                authors,
+                genres
+            LIMIT 50
+        """, surname=surname).data()
 
-        surname = max(name_parts, key=len)
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run("""
-                MATCH (b:Book)-[:WRITTEN_BY]->(a:Author)
-                WHERE 
-                    toLower(a.author) CONTAINS $surname
-                    // --- ADDED (Wikidata enrichment) ---
-                    OR (b.author IS NOT NULL AND toLower(b.author) CONTAINS $surname)
-                    // -----------------------------------
-                OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
-                RETURN DISTINCT
-                    b.title AS title,
-                    a.author AS author,
-                    collect(DISTINCT g.subject_1) AS genres
-                LIMIT 50
-            """, surname=surname)
-
-            books = []
-            for record in result:
-                author_full = record['author'] or ''
-                author_lower = author_full.lower()
-
-                all_match = True
-                for part in name_parts:
-                    if len(part) == 1:
-                        pattern = r'(^|[\s,])' + part + r'($|[\s.])'
-                        if not re.search(pattern, author_lower):
-                            all_match = False
-                            break
-                    else:
-                        if part not in author_lower:
-                            all_match = False
-                            break
-
-                if all_match:
-                    books.append({
-                        'title': record['title'],
-                        'authors': [author_full] if author_full else [],
-                        'genres': [g for g in record['genres'] if g]
-                    })
-                    if len(books) >= limit:
-                        break
-
-            return books
+        return [{
+            'title': r.get('title'),
+            'authors': [a for a in (r.get('authors') or []) if a],
+            'genres': [g for g in (r.get('genres') or []) if g]
+        } for r in result if r.get('title')][:limit]
 
     def retrieve_similar_books(self, book_title: str, limit: int = 5) -> List[Dict[str, Any]]:
         keywords = self._filter_keywords(book_title)
@@ -418,9 +399,9 @@ class GraphRAGQwen:
                     collect(DISTINCT ba.author) +
                         CASE WHEN book.author IS NOT NULL THEN [book.author] ELSE [] END
                         AS authors,
-                
                     collect(DISTINCT bg.subject_1) +
-                        CASE WHEN book.genre IS NOT NULL THEN [book.genre] ELSE [] END
+                        CASE WHEN book.genre IS NOT NULL THEN [book.genre] ELSE [] END +
+                        CASE WHEN book.subject IS NOT NULL THEN [book.subject] ELSE [] END
                         AS genres
                 LIMIT $limit
             """, source_title=source_title, limit=limit).data()
