@@ -102,7 +102,7 @@ class GraphRAGQwen:
         if not author:
             return ''
         author = author.strip()
-        author = re.sub(r',?\s*\d{4}-\d{0,4}', '', author).strip()
+        author = re.sub(r',?\s*\d{4}(-\d{4})?', '', author)
         if ',' in author:
             parts = [p.strip() for p in author.split(',', 1)]
             if len(parts) == 2 and parts[1]:
@@ -139,11 +139,35 @@ class GraphRAGQwen:
                     deduped_genres.append(g)
             cleaned.append({
                 **book,
-                'authors': [self._clean_author(a) for a in book.get('authors', []) if a],
+                'authors': list(dict.fromkeys(
+                    self._clean_author(a) for a in book.get('authors', []) if a
+                )),
                 'genres': deduped_genres,
             })
         return cleaned
 
+    # ---------------------------
+    # Keyword handling
+    # ---------------------------
+
+    def _expand_keyword(self, kw: str) -> List[str]:
+        variants = [kw]
+        if kw.endswith('y'):
+            variants.append(kw[:-1] + 'ies')
+        elif not kw.endswith('s'):
+            variants.append(kw + 's')
+        return variants
+        
+    def _filter_keywords(self, query: str) -> List[str]:
+        words = re.sub(r'[^\w\s]', ' ', query.lower()).split()
+        keywords = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
+
+        expanded = []
+        for kw in keywords:
+            expanded.extend(self._expand_keyword(kw))
+
+        return list(dict.fromkeys(expanded))
+    
     # -----------------------------------------------------------------------
     # Intent parsing helpers
     # -----------------------------------------------------------------------
@@ -180,9 +204,8 @@ class GraphRAGQwen:
             match = re.search(pattern, query_lower)
             if match:
                 term = self._clean_term(match.group(1).strip())
-                book_words = ['harry', 'potter', 'hunger', 'games', 'narnia']
-                if term and not any(word in term for word in book_words):
-                    return ("author", term)
+                if len(term.split()) <= 4:
+                    return "author", term
 
         return ("keyword", query)
 
@@ -200,23 +223,6 @@ class GraphRAGQwen:
         else:
             keywords = self._filter_keywords(query)
             return keywords, "OR"
-
-    def _filter_keywords(self, query: str) -> List[str]:
-        query_clean = re.sub(r'[^\w\s]', ' ', query.lower())
-        words = query_clean.split()
-        keywords = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
-        if not keywords:
-            keywords = [w for w in words if len(w) > 2][:3]
-
-        expanded = []
-        for kw in (keywords if keywords else words[:3]):
-            expanded.append(kw)
-            if kw.endswith('s') and len(kw) > 3:
-                expanded.append(kw[:-1])
-            elif not kw.endswith('s'):
-                expanded.append(kw + 's')
-
-        return list(dict.fromkeys(expanded))
 
     # -----------------------------------------------------------------------
     # Retrieval methods
@@ -238,45 +244,35 @@ class GraphRAGQwen:
                 MATCH (b:Book)
                 OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
                 OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
-                WITH b,
-                     collect(DISTINCT a.author) AS authors_rel,
-                     collect(DISTINCT g.subject_1) AS genres_rel,
-                     // --- ADDED (Wikidata enrichment) ---
-                     b.author AS authors_wiki,
-                     b.genre AS genres_wiki,
-                     b.subject AS subject_wiki,
-                     b.language AS language_wiki,
-                     // ----------------------------------
-                     toLower(b.title) AS title_lower
-                WITH b,
-                     // --- ADDED: merge graph + Wikidata ---
-                     authors_rel +
-                     CASE WHEN authors_wiki IS NOT NULL AND authors_wiki <> "" THEN [authors_wiki] ELSE [] END
-                     AS authors,
-                     genres_rel +
-                     CASE WHEN genres_wiki IS NOT NULL AND genres_wiki <> "" THEN [genres_wiki] ELSE [] END +
-                     CASE WHEN subject_wiki IS NOT NULL AND subject_wiki <> "" THEN [subject_wiki] ELSE [] END
-                     AS genres,
-                     // -------------------------------------
-                     title_lower,
-                     // --- ADDED ---
-                     CASE WHEN language_wiki IS NOT NULL THEN toLower(language_wiki) ELSE "" END AS language_lower,
-                     // -------------------------------------
-                     [gen IN genres_rel | toLower(coalesce(gen, ''))] AS genres_lower
+                WITH 
+                    b,
+                    collect(DISTINCT a.author) AS authors_rel,
+                    collect(DISTINCT g.subject_1) AS genres_rel,
+                    coalesce(b.author, "") AS author_wiki,
+                    coalesce(b.genre, "") AS genre_wiki,
+                    coalesce(b.subject, "") AS subject_wiki,
+                    coalesce(b.language, "") AS language_wiki,
+                    toLower(b.title) AS title_lower
+                WITH 
+                    b,
+                    authors_rel + CASE WHEN author_wiki <> "" THEN [author_wiki] ELSE [] END AS authors,
+                    genres_rel + 
+                        CASE WHEN genre_wiki <> "" THEN [genre_wiki] ELSE [] END +
+                        CASE WHEN subject_wiki <> "" THEN [subject_wiki] ELSE [] END AS genres,
+                    title_lower,
+                    toLower(language_wiki) AS language_lower
                 WHERE ANY(keyword IN $keywords WHERE
                     title_lower CONTAINS keyword OR
-                    ANY(g IN genres_lower WHERE g CONTAINS keyword)
-                    // --- ADDED ---
-                    OR language_lower CONTAINS keyword
-                    // -------------------------------------
+                    ANY(g IN genres WHERE toLower(g) CONTAINS keyword) OR
+                    language_lower CONTAINS keyword
                 )
-                RETURN
+                RETURN 
                     b.title AS title,
                     authors,
                     genres
                 LIMIT 500
             """, keywords=keywords).data()
-
+            
             if debug:
                 print(f"  Stage 1 (CONTAINS): {len(result)} candidates", flush=True)
 
@@ -289,7 +285,9 @@ class GraphRAGQwen:
                 search_text = title.lower()
                 for g in genres:
                     search_text += ' ' + g.lower()
-
+                for a in authors:
+                    search_text += ' ' + a.lower()
+                    
                 matches = 0
                 for kw in keywords:
                     pattern = r'\b' + re.escape(kw) + r'\b'
@@ -494,13 +492,17 @@ class GraphRAGQwen:
         prompt = (
             f"A library patron asked: \"{query}\"\n"
             f"{task}\n\n"
-            f"For each book below, write 2 to 3 sentences that:\n"
-            f"- Describe what the book is about in an engaging way\n"
-            f"- Naturally mention the genre or feel of the book without using the word 'genre'\n"
-            f"- Explain briefly why it suits the patron's request\n\n"
-            f"Return ONLY a numbered list — one blurb per book, nothing else.\n"
-            f"Do not repeat the book title in your response. "
-            f"Do not add extra books. Do not use asterisks or markdown.\n\n"
+            f"You are a helpful librarian.\n\n"
+            f"For EACH book below, write exactly 2 sentences:\n"
+            f"1. First sentence: what the book is about\n"
+            f"2. Second sentence: why it matches the request\n\n"
+            f"Rules:\n"
+            f"- Do NOT repeat the book title\n"
+            f"- Do NOT invent facts\n"
+            f"- Keep each response specific (no generic phrases like 'this book explores themes')\n"
+            f"- Mention tone/feel naturally (e.g., dark, adventurous, emotional)\n"
+            f"- No markdown, no asterisks\n\n"
+            f"Return ONLY a numbered list.\n\n"
             f"Books:\n{numbered}"
         )
 
