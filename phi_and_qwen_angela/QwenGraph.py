@@ -23,6 +23,8 @@ class GraphRAGQwen:
         'read', 'something', 'anything', 'recommend', 'similar', 'like',
         'please', 'help', 'tell', 'list',
         'author', 'authors', 'writer', 'writers',
+        'and', 'or',
+        'written', 'authored',
     }
 
     _TRAILING_FILLER = re.compile(
@@ -268,12 +270,27 @@ class GraphRAGQwen:
         # Use base words without plural expansion so "canadians" doesn't block "canadian"
         base_words = [w for w in re.sub(r'[^\w\s]', ' ', query.lower()).split()
                       if w not in self.STOP_WORDS and len(w) > 2]
-        field_kws = [w for w in base_words if w in self._field_index]
-        content_kws = [w for w in base_words if w not in self._field_index]
+        field_kws = [w for w in base_words if w in self._field_index
+                     or (w.endswith('s') and w[:-1] in self._field_index)]
+        content_kws = [w for w in base_words if w not in self._field_index
+                       and not (w.endswith('s') and w[:-1] in self._field_index)]
+
+        # Resolve plural forms to their singular index entry
+        resolved = []
+        for w in field_kws:
+            if w in self._field_index:
+                resolved.append(self._field_index[w])
+            else:
+                resolved.append(self._field_index[w[:-1]])
         print(f"  Field index size: {len(self._field_index)}, base_words: {base_words}, field_kws: {field_kws}, content_kws: {content_kws}", flush=True)
-        if field_kws and not content_kws:
-            node, prop, val = self._field_index[field_kws[0]]
-            return ("field_filter", {'node': node, 'prop': prop, 'value': val})
+        if field_kws:
+            if not content_kws:
+                # Pure field query: "books in spanish", "books by canadian authors"
+                node, prop, val = resolved[0]
+                return ("field_filter", {'node': node, 'prop': prop, 'value': val})
+            else:
+                # Mixed query: fall through to keyword search
+                return ("keyword", query)
 
         similar_patterns = [
             r'(?:books?\s+)?(?:like|similar\s+to|such\s+as)\s+(.+)',
@@ -513,11 +530,12 @@ class GraphRAGQwen:
             } for r in result if r['title']]
 
     def retrieve_books_by_field(self, node: str, prop: str, value: str, limit: int = 10) -> List[Dict[str, Any]]:
+        print(f"  retrieve_books_by_field: node={node}, prop={prop}, value={value!r}", flush=True)
         if node == 'Book':
             query = """
                 MATCH (b:Book)
-                WHERE toLower(coalesce(b[$prop], '')) CONTAINS $value
-                  AND size(coalesce(b[$prop], '')) < 50
+                WHERE toLower(coalesce(properties(b)[$prop], '')) CONTAINS $value
+                  AND size(coalesce(properties(b)[$prop], '')) < 50
                 OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
                 OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
                 RETURN b.title AS title,
@@ -528,7 +546,7 @@ class GraphRAGQwen:
         else:
             query = """
                 MATCH (b:Book)-[:WRITTEN_BY]->(a:Author)
-                WHERE toLower(coalesce(a[$prop], '')) CONTAINS $value
+                WHERE toLower(coalesce(properties(a)[$prop], '')) CONTAINS $value
                 OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
                 RETURN b.title AS title,
                        collect(DISTINCT a.author) AS authors,
