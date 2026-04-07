@@ -21,7 +21,8 @@ class GraphRAGQwen:
         'can', 'could', 'would', 'should', 'will', 'may', 'might',
         'any', 'all', 'more', 'most', 'other', 'new', 'good', 'great',
         'read', 'something', 'anything', 'recommend', 'similar', 'like',
-        'please', 'help', 'tell', 'list'
+        'please', 'help', 'tell', 'list',
+        'author', 'authors', 'writer', 'writers',
     }
 
     _TRAILING_FILLER = re.compile(
@@ -54,6 +55,7 @@ class GraphRAGQwen:
         self.model_name = "qwen2.5:3b"
         self._verify_connection()
         self._verify_ollama()
+        self._build_field_index()
 
     def _verify_connection(self):
         try:
@@ -88,6 +90,87 @@ class GraphRAGQwen:
 
     def close(self):
         self.driver.close()
+
+    # nationality adjectives → country values as stored in Neo4j
+    _NATIONALITY_MAP = {
+        'canadian':      'canada',
+        'american':      'united states',
+        'british':       'united kingdom',
+        'english':       'united kingdom',
+        'australian':    'australia',
+        'irish':         'ireland',
+        'scottish':      'scotland',
+        'french':        'france',
+        'german':        'germany',
+        'japanese':      'japan',
+        'russian':       'russia',
+        'spanish':       'spain',
+        'italian':       'italy',
+        'chinese':       'china',
+        'brazilian':     'brazil',
+        'mexican':       'mexico',
+        'swedish':       'sweden',
+        'norwegian':     'norway',
+        'danish':        'denmark',
+        'dutch':         'netherlands',
+        'portuguese':    'portugal',
+        'polish':        'poland',
+        'indian':        'india',
+        'nigerian':      'nigeria',
+        'ghanaian':      'ghana',
+        'kenyan':        'kenya',
+    }
+
+    def _build_field_index(self):
+        """
+        Build a lookup dict from query keywords to (node, property, value)
+        using whatever values actually exist in the graph.
+        """
+        self._field_index = {}
+
+        with self.driver.session(database=self.database) as session:
+            # Book languages
+            langs = session.run("""
+                MATCH (b:Book)
+                WHERE b.language IS NOT NULL AND b.language <> ""
+                  AND size(b.language) < 50
+                RETURN DISTINCT toLower(b.language) AS val
+            """).data()
+            for row in langs:
+                val = row['val'].strip()
+                if val:
+                    self._field_index[val] = ('Book', 'language', val)
+
+            # Author countries — stored values may be comma-separated
+            countries = session.run("""
+                MATCH (a:Author)
+                WHERE a.country IS NOT NULL AND a.country <> ""
+                RETURN DISTINCT a.country AS val
+            """).data()
+            for row in countries:
+                for country in row['val'].split(','):
+                    country = country.strip().lower()
+                    if country:
+                        self._field_index[country] = ('Author', 'country', country)
+
+            # Author occupations — comma-separated
+            occs = session.run("""
+                MATCH (a:Author)
+                WHERE a.occupation IS NOT NULL AND a.occupation <> ""
+                RETURN DISTINCT a.occupation AS val
+            """).data()
+            for row in occs:
+                for occ in row['val'].split(','):
+                    occ = occ.strip().lower()
+                    if len(occ) > 3:
+                        self._field_index[occ] = ('Author', 'occupation', occ)
+
+        # Add nationality adjectives that map to country values
+        for adjective, country_value in self._NATIONALITY_MAP.items():
+            if country_value in self._field_index:
+                self._field_index[adjective] = ('Author', 'country', country_value)
+
+        print(f"Field index built: {len(self._field_index)} entries", flush=True)
 
     # -----------------------------------------------------------------------
     # Data cleaning helpers
@@ -178,8 +261,19 @@ class GraphRAGQwen:
         term = re.sub(r'[^\w\s\'-]', '', term).strip()
         return term
 
-    def _parse_query_intent(self, query: str) -> Tuple[str, str]:
+    def _parse_query_intent(self, query: str) -> Tuple[str, Any]:
         query_lower = query.lower().strip()
+
+        # --- check field index first (language, country, occupation) ---
+        # Use base words without plural expansion so "canadians" doesn't block "canadian"
+        base_words = [w for w in re.sub(r'[^\w\s]', ' ', query.lower()).split()
+                      if w not in self.STOP_WORDS and len(w) > 2]
+        field_kws = [w for w in base_words if w in self._field_index]
+        content_kws = [w for w in base_words if w not in self._field_index]
+        print(f"  Field index size: {len(self._field_index)}, base_words: {base_words}, field_kws: {field_kws}, content_kws: {content_kws}", flush=True)
+        if field_kws and not content_kws:
+            node, prop, val = self._field_index[field_kws[0]]
+            return ("field_filter", {'node': node, 'prop': prop, 'value': val})
 
         similar_patterns = [
             r'(?:books?\s+)?(?:like|similar\s+to|such\s+as)\s+(.+)',
@@ -256,9 +350,7 @@ class GraphRAGQwen:
                     toLower(b.title) AS title_lower
                 WITH 
                     b,
-                    // --- FIX: merge graph + wikidata authors ---
                     authors_rel + CASE WHEN author_wiki <> "" THEN [author_wiki] ELSE [] END AS authors,
-                    // --- FIX: merge ALL enriched metadata ---
                     genres_rel + 
                         CASE WHEN genre_wiki <> "" THEN [genre_wiki] ELSE [] END +
                         CASE WHEN subject_wiki <> "" THEN [subject_wiki] ELSE [] END AS genres,
@@ -270,10 +362,12 @@ class GraphRAGQwen:
                     ANY(a IN authors WHERE toLower(a) CONTAINS keyword) OR
                     language_lower CONTAINS keyword
                 )
+                WITH b, authors, genres, language_lower
                 RETURN 
                     b.title AS title,
                     authors,
-                    genres
+                    genres,
+                    language_lower
                 LIMIT 500
             """, keywords=keywords).data()
 
@@ -283,8 +377,7 @@ class GraphRAGQwen:
                 title = record.get('title') or ''
                 authors = [a for a in (record.get('authors') or []) if a]
                 genres = [g for g in (record.get('genres') or []) if g]
-    
-                search_text = f"{title.lower()} {' '.join(a.lower() for a in authors)} {' '.join(g.lower() for g in genres)}"
+                language = record.get('language_lower') or ''
     
                 matches = 0
                 score = 0
@@ -292,13 +385,17 @@ class GraphRAGQwen:
                 for kw in keywords:
                     if re.search(r'\b' + re.escape(kw) + r'\b', title.lower()):
                         matches += 1
-                        score += 3  # --- FIX: title weight ---
+                        score += 3
                     elif any(kw in g.lower() for g in genres):
                         matches += 1
-                        score += 2  # --- FIX: genre weight ---
+                        score += 2
+                    elif kw in language:
+                        matches += 1
+                        score += 2
                     elif any(kw in a.lower() for a in authors):
                         matches += 1
-                        score += 1  # --- FIX: author weight ---
+                        score += 1
+
     
                 if logic == "AND" and matches < len(keywords):
                     continue
@@ -415,6 +512,37 @@ class GraphRAGQwen:
                 'genres': [g for g in r['genres'] if g]
             } for r in result if r['title']]
 
+    def retrieve_books_by_field(self, node: str, prop: str, value: str, limit: int = 10) -> List[Dict[str, Any]]:
+        if node == 'Book':
+            query = """
+                MATCH (b:Book)
+                WHERE toLower(coalesce(b[$prop], '')) CONTAINS $value
+                  AND size(coalesce(b[$prop], '')) < 50
+                OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
+                OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
+                RETURN b.title AS title,
+                       collect(DISTINCT a.author) AS authors,
+                       collect(DISTINCT g.subject_1) AS genres
+                LIMIT $limit
+            """
+        else:
+            query = """
+                MATCH (b:Book)-[:WRITTEN_BY]->(a:Author)
+                WHERE toLower(coalesce(a[$prop], '')) CONTAINS $value
+                OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
+                RETURN b.title AS title,
+                       collect(DISTINCT a.author) AS authors,
+                       collect(DISTINCT g.subject_1) AS genres
+                LIMIT $limit
+            """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, prop=prop, value=value, limit=limit).data()
+        return [{
+            'title': r['title'],
+            'authors': [a for a in r['authors'] if a],
+            'genres': [g for g in r['genres'] if g],
+        } for r in result if r['title']]
+
     def smart_retrieve(self, query: str, limit: int = 5, debug: bool = True) -> Tuple[List[Dict[str, Any]], str]:
         intent, term = self._parse_query_intent(query)
 
@@ -427,6 +555,11 @@ class GraphRAGQwen:
         elif intent == "similar":
             books = self.retrieve_similar_books(term, limit)
             return books, "similar"
+        elif intent == "field_filter":
+            books = self.retrieve_books_by_field(
+                term['node'], term['prop'], term['value'], limit
+            )
+            return books, "keyword"
         else:
             books = self.retrieve_books_by_keyword(query, limit, debug=debug)
             return books, "keyword"
