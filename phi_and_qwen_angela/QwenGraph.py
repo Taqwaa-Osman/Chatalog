@@ -239,13 +239,36 @@ class GraphRAGQwen:
                 OPTIONAL MATCH (b)-[:WRITTEN_BY]->(a:Author)
                 OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
                 WITH b,
-                     collect(DISTINCT a.author) AS authors,
-                     collect(DISTINCT g.subject_1) AS genres,
-                     toLower(b.title) AS title_lower,
-                     [gen IN collect(DISTINCT g.subject_1) | toLower(coalesce(gen, ''))] AS genres_lower
+                     collect(DISTINCT a.author) AS authors_rel,
+                     collect(DISTINCT g.subject_1) AS genres_rel,
+                     // --- ADDED (Wikidata enrichment) ---
+                     b.author AS authors_wiki,
+                     b.genre AS genres_wiki,
+                     b.subject AS subject_wiki,
+                     b.language AS language_wiki,
+                     // ----------------------------------
+                     toLower(b.title) AS title_lower
+                WITH b,
+                     // --- ADDED: merge graph + Wikidata ---
+                     authors_rel +
+                     CASE WHEN authors_wiki IS NOT NULL AND authors_wiki <> "" THEN [authors_wiki] ELSE [] END
+                     AS authors,
+                     genres_rel +
+                     CASE WHEN genres_wiki IS NOT NULL AND genres_wiki <> "" THEN [genres_wiki] ELSE [] END +
+                     CASE WHEN subject_wiki IS NOT NULL AND subject_wiki <> "" THEN [subject_wiki] ELSE [] END
+                     AS genres,
+                     // -------------------------------------
+                     title_lower,
+                     // --- ADDED ---
+                     CASE WHEN language_wiki IS NOT NULL THEN toLower(language_wiki) ELSE "" END AS language_lower,
+                     // -------------------------------------
+                     [gen IN genres_rel | toLower(coalesce(gen, ''))] AS genres_lower
                 WHERE ANY(keyword IN $keywords WHERE
                     title_lower CONTAINS keyword OR
                     ANY(g IN genres_lower WHERE g CONTAINS keyword)
+                    // --- ADDED ---
+                    OR language_lower CONTAINS keyword
+                    // -------------------------------------
                 )
                 RETURN
                     b.title AS title,
@@ -311,7 +334,11 @@ class GraphRAGQwen:
         with self.driver.session(database=self.database) as session:
             result = session.run("""
                 MATCH (b:Book)-[:WRITTEN_BY]->(a:Author)
-                WHERE toLower(a.author) CONTAINS $surname
+                WHERE 
+                    toLower(a.author) CONTAINS $surname
+                    // --- ADDED (Wikidata enrichment) ---
+                    OR (b.author IS NOT NULL AND toLower(b.author) CONTAINS $surname)
+                    // -----------------------------------
                 OPTIONAL MATCH (b)-[:HAS_SUBJECT]->(g:Genre)
                 RETURN DISTINCT
                     b.title AS title,
@@ -390,8 +417,13 @@ class GraphRAGQwen:
 
                 RETURN DISTINCT
                     book.title AS title,
-                    collect(DISTINCT ba.author) AS authors,
-                    collect(DISTINCT bg.subject_1) AS genres
+                    collect(DISTINCT ba.author) +
+                        CASE WHEN book.author IS NOT NULL THEN [book.author] ELSE [] END
+                        AS authors,
+                
+                    collect(DISTINCT bg.subject_1) +
+                        CASE WHEN book.genre IS NOT NULL THEN [book.genre] ELSE [] END
+                        AS genres
                 LIMIT $limit
             """, source_title=source_title, limit=limit).data()
 
